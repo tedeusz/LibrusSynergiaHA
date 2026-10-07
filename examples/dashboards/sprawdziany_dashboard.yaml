@@ -1,0 +1,54 @@
+# Dashboard "Sprawdziany" dla integracji Librus APIX (zastępuje stary widok z tabelką z terminarza).
+# Wklej: Ustawienia > Pulpity > (pulpit) > Edytuj > ⋮ > Edytor YAML - jako JEDEN element listy spod "views:".
+# Encja: sensor.librus_imie_nazwisko_terminarz (jeśli u Ciebie inna - zmień w pierwszej linii każdego szablonu).
+# Rozpoznaje: sprawdzian, klasówka, praca klasowa (🔴) oraz kartkówka (🟠). Dane z terminarza obejmują
+# bieżący i następny miesiąc, tylko zdarzenia od dziś wzwyż.
+title: Librus sprawdziany
+views:
+  - title: Sprawdziany
+    path: sprawdziany
+    icon: mdi:clipboard-text-clock
+    type: panel
+    cards:
+      - type: vertical-stack
+        cards:
+          # --- Podsumowanie ---
+          - type: markdown
+            content: |
+              {%- set e = 'sensor.librus_imie_nazwisko_terminarz' -%}
+              {%- set ns = namespace(s=0, k=0, pierwszy=none) -%}
+              {%- for d in state_attr(e, 'wg_dni') or [] %}{% for z in d.zdarzenia if z.typ in ['sprawdzian', 'kartkowka'] %}
+              {%- if z.typ == 'sprawdzian' %}{% set ns.s = ns.s + 1 %}{% else %}{% set ns.k = ns.k + 1 %}{% endif %}
+              {%- if ns.pierwszy is none %}{% set ns.pierwszy = {'d': d, 'z': z} %}{% endif %}
+              {%- endfor %}{% endfor %}
+              {%- if states(e) in ['unknown', 'unavailable'] -%}
+              Brak danych z terminarza.
+              {%- elif ns.pierwszy is none -%}
+              ✅ Brak zapowiedzianych sprawdzianów i kartkówek.
+              {%- else -%}
+              📝 **Zapowiedziane: {{ ns.s + ns.k }}** · 🔴 sprawdziany: **{{ ns.s }}** · 🟠 kartkówki: **{{ ns.k }}**
+
+              ⏭️ **Najbliższe:** {{ ns.pierwszy.d.etykieta | lower }} ({{ ns.pierwszy.d.dzien }} {{ ns.pierwszy.d.data[8:10] }}.{{ ns.pierwszy.d.data[5:7] }}) · {{ ns.pierwszy.z.ikona }} {{ ns.pierwszy.z.etykieta }}: {{ ns.pierwszy.z.opis }}
+              {%- endif -%}
+
+          # --- Lista pogrupowana po dniach ---
+          - type: markdown
+            title: 📝 Sprawdziany i kartkówki
+            content: |
+              {%- set e = 'sensor.librus_imie_nazwisko_terminarz' -%}
+              {%- set ns = namespace(n=0) -%}
+              {%- for d in state_attr(e, 'wg_dni') or [] %}
+              {%- set testy = d.zdarzenia | selectattr('typ', 'in', ['sprawdzian', 'kartkowka']) | list %}
+              {%- if testy %}
+              {%- set ns.n = ns.n + 1 %}
+              {%- set kolor = '🔴' if d.dni_do == 0 else '🟠' if d.dni_do == 1 else '🟡' if d.dni_do <= 3 else '🟢' %}
+
+              ### {{ kolor }} {{ d.etykieta }} · {{ d.dzien }} {{ d.data[8:10] }}.{{ d.data[5:7] }}
+              {%- for z in testy %}
+              - {{ z.ikona }} **{{ z.etykieta }}**{% if z.numer_lekcji %} · lekcja {{ z.numer_lekcji }}{% endif %}{% if z.opis %} · {{ z.opis }}{% endif %}{% if z.dodatkowy %} — _{{ z.dodatkowy | replace('\r', ' ') | replace('\n', ' ') | truncate(300) }}_{% endif %}
+              {%- endfor %}
+              {%- endif %}
+              {%- endfor %}
+              {%- if ns.n == 0 -%}
+              ✅ Brak zapowiedzianych sprawdzianów i kartkówek.
+              {%- endif -%}

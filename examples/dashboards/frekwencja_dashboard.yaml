@@ -1,0 +1,80 @@
+# Dashboard "Frekwencja" dla integracji Librus APIX
+# Wklej: Ustawienia > Pulpity > (pulpit) > Edytuj > ⋮ > Edytor YAML (Raw configuration editor)
+# Wymaga czujnikow sensor.librus_imie_nazwisko_frekwencja i ..._nieobecnosci.
+title: Librus
+views:
+  - title: Frekwencja
+    path: frekwencja
+    icon: mdi:account-check
+    type: panel
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: markdown
+            title: ✅ Frekwencja
+            content: |
+              {%- set f = 'sensor.librus_imie_nazwisko_frekwencja' -%}
+              {%- set n = 'sensor.librus_imie_nazwisko_nieobecnosci' -%}
+              {%- set sem = state_attr(f, 'semestr_biezacy') -%}
+              {%- if states(f) in ['unknown', 'unavailable'] -%}
+              Brak danych o frekwencji.
+              {%- else -%}
+              ## {{ states(f) | float(0) | round(1) }}% <small>ogółem</small>
+
+              Semestr 1: **{{ (state_attr(f, 'semestr_1') ~ '%') if state_attr(f, 'semestr_1') is not none else '—' }}** · Semestr 2: **{{ (state_attr(f, 'semestr_2') ~ '%') if state_attr(f, 'semestr_2') is not none else '—' }}**{% if sem %} · _bieżący: semestr {{ sem }}_{% endif %}
+
+              | | |
+              |---|---|
+              | ❌ Nieusprawiedliwione | **{{ state_attr(n, 'liczba_nieusprawiedliwionych') | default(0, true) }}** |
+              | ✅ Usprawiedliwione | **{{ state_attr(n, 'liczba_usprawiedliwionych') | default(0, true) }}** |
+              | ⏰ Spóźnienia | **{{ state_attr(n, 'liczba_spoznien') | default(0, true) }}** |
+              | 📝 Zwolnienia | **{{ state_attr(n, 'liczba_zwolnien') | default(0, true) }}** |
+              {%- endif -%}
+          - type: markdown
+            title: 🗒️ Nieobecności, spóźnienia, zwolnienia
+            content: |
+              {%- set n = 'sensor.librus_imie_nazwisko_nieobecnosci' -%}
+              {%- set p = state_attr(n, 'przegladanie') or {} -%}
+              {%- set wpisy = p.wpisy or [] -%}
+              {%- set ikony = {'nb': '❌', 'u': '✅', 'sp': '⏰', 'zw': '📝'} -%}
+              {%- if not wpisy -%}
+              Brak nieobecności, spóźnień i zwolnień. 🎉
+              {%- else -%}
+              _Wpisy {{ p.od }}–{{ p.do }} z {{ p.razem }}{{ ' (najnowsze)' if p.najnowsze else '' }}_
+              {%- for w in wpisy %}
+              - {{ ikony.get(w.symbol, '•') }} **{{ w.data }}** · {{ w.typ or w.symbol }}{% if w.przedmiot %} · {{ w.przedmiot }}{% endif %}{% if w.godzina_lekcyjna %} · lekcja {{ w.godzina_lekcyjna }}{% endif %}{% if w.nauczyciel %} · _{{ w.nauczyciel }}_{% endif %}{% if w.temat %}<br>📖 <i>{{ w.temat }}</i>{% endif %}
+              {%- endfor %}
+              {%- if state_attr(n, 'sa_nowe_wpisy') %}
+
+              🆕 _Są nowe wpisy z ostatnich dni._
+              {%- endif %}
+              {%- endif -%}
+          - type: horizontal-stack
+            cards:
+              - type: custom:mushroom-template-card
+                primary: Starsze
+                icon: mdi:chevron-left
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_frekwencje
+                  data:
+                    kierunek: nastepna
+              - type: custom:mushroom-template-card
+                primary: Najnowsze
+                icon: mdi:page-first
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_frekwencje
+                  data:
+                    kierunek: najnowsze
+              - type: custom:mushroom-template-card
+                primary: Nowsze
+                icon: mdi:chevron-right
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_frekwencje
+                  data:
+                    kierunek: poprzednia

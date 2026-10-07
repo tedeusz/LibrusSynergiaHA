@@ -1,0 +1,92 @@
+# Dashboard "Oceny" dla integracji Librus APIX (zastępuje stary widok z encjami i tabelką HTML).
+# Wklej: Ustawienia > Pulpity > (pulpit) > Edytuj > ⋮ > Edytor YAML - jako JEDEN element listy spod "views:".
+# Encje: sensor.librus_imie_nazwisko_oceny i sensor.librus_imie_nazwisko_szczesliwy_numerek (jeśli u Ciebie inne - zmień w szablonach).
+# Plakietki: 🟢 5-6 · 🔵 4 · 🟡 3 · 🟠 2 · 🔴 1 · 💬 ocena opisowa. Trend: ↗ ostatnia ocena podniosła średnią, ↘ obniżyła, → bez zmian.
+title: Librus oceny
+views:
+  - title: Oceny
+    path: oceny
+    icon: mdi:school
+    type: panel
+    cards:
+      - type: vertical-stack
+        cards:
+          # --- Podsumowanie ---
+          - type: markdown
+            content: |
+              {%- set e = 'sensor.librus_imie_nazwisko_oceny' -%}
+              {%- set pod = state_attr(e, 'podsumowanie') or {} -%}
+              {%- set n = states('sensor.librus_imie_nazwisko_szczesliwy_numerek') -%}
+              {%- if states(e) in ['unknown', 'unavailable'] -%}
+              Brak danych o ocenach.
+              {%- elif states(e) | int(0) == 0 -%}
+              📭 **Brak ocen w semestrze {{ state_attr(e, 'semestr') or '' }}.**{% if n not in ['unknown', 'unavailable', 'None'] %} · 🍀 szczęśliwy numerek: **{{ n }}**{% endif %}
+              {%- else -%}
+              🎓 **Średnia ważona: {{ ("%.2f" | format(pod.srednia_wazona)) | replace('.', ',') if pod.srednia_wazona is not none else '—' }}** · ocen: **{{ states(e) }}** · przedmiotów: **{{ state_attr(e, 'liczba_przedmiotow') }}**{% if pod.liczba_nowych %} · 🆕 nowych: **{{ pod.liczba_nowych }}**{% endif %}{% if n not in ['unknown', 'unavailable', 'None'] %} · 🍀 numerek: **{{ n }}**{% endif %}
+              {%- if pod.najlepszy %}
+
+              🏆 **Najlepszy:** {{ pod.najlepszy }}{% if pod.najslabszy and pod.najslabszy != pod.najlepszy %} · ⚠️ **Najsłabszy:** {{ pod.najslabszy }}{% endif %}
+              {%- endif %}
+              {%- endif -%}
+
+          # --- Zestawienie wg przedmiotów ---
+          - type: markdown
+            title: 📊 Oceny wg przedmiotów
+            content: |
+              {%- set przedmioty = state_attr('sensor.librus_imie_nazwisko_oceny', 'przedmioty') or [] -%}
+              {%- if not przedmioty -%}
+              Brak ocen do wyświetlenia.
+              {%- else -%}
+              | Przedmiot | Oceny | Średnia | |
+              |:--|:--|:-:|:-:|
+              {% for p in przedmioty -%}
+              | {{ '🆕 ' if p.ma_nowe else '' }}**{{ p.przedmiot }}** | {% for o in p.oceny %}{{ o.ikona }}{{ o.ocena if o.ocena | length <= 3 else '' }}{{ '🆕' if o.nowa else '' }} {% endfor %}| {{ ("%.2f" | format(p.srednia)) | replace('.', ',') if p.srednia is not none else '—' }}{% if p.srednia_librus is not none and p.srednia is not none and (p.srednia_librus - p.srednia) | abs > 0.05 %} <small>(Librus {{ ("%.2f" | format(p.srednia_librus)) | replace('.', ',') }})</small>{% endif %} | {{ p.trend or '' }} |
+              {% endfor %}
+              {%- endif -%}
+
+          # --- Ostatnie oceny (po 8 na ekran, przyciski poniżej) ---
+          - type: markdown
+            title: 🆕 Ostatnie oceny
+            content: |
+              {%- set p = state_attr('sensor.librus_imie_nazwisko_oceny', 'przegladanie') or {} -%}
+              {%- set lista = p.oceny or [] -%}
+              {%- set dzis = now().date() -%}
+              {%- if not lista -%}
+              Brak ocen do wyświetlenia.
+              {%- else -%}
+              _Oceny {{ p.od }}–{{ p.do }} z {{ p.razem }}{{ ' (najnowsze)' if p.najnowsze else '' }}_
+              {%- for o in lista %}
+              {%- set roznica = (dzis - as_datetime(o.data_iso).date()).days if o.data_iso else none %}
+              {%- set kiedy = 'dziś' if roznica == 0 else 'wczoraj' if roznica == 1 else roznica ~ ' dni temu' if roznica is not none and roznica < 14 else o.data %}
+              - {{ o.ikona }} **{{ o.ocena if o.ocena | length <= 8 else 'opisowa' }}** · {{ o.przedmiot }}{% if o.kategoria %} · {{ o.kategoria }}{% endif %}{% if o.waga and not o.opisowa %} · waga {{ o.waga }}{% endif %} · _{{ kiedy }}_{{ ' 🆕' if o.jest_nowa else '' }}{{ ' · nie liczy się' if o.liczy_sie == false else '' }}{% if o.komentarz %}<br>💬 {{ o.komentarz | replace('\r', ' ') | replace('\n', ' ') | truncate(200) }}{% endif %}
+              {%- endfor %}
+              {%- endif -%}
+          - type: horizontal-stack
+            cards:
+              - type: custom:mushroom-template-card
+                primary: Starsze
+                icon: mdi:chevron-left
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_oceny
+                  data:
+                    kierunek: nastepna
+              - type: custom:mushroom-template-card
+                primary: Najnowsze
+                icon: mdi:page-first
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_oceny
+                  data:
+                    kierunek: najnowsze
+              - type: custom:mushroom-template-card
+                primary: Nowsze
+                icon: mdi:chevron-right
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_oceny
+                  data:
+                    kierunek: poprzednia

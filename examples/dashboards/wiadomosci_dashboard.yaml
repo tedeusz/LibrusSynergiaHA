@@ -1,0 +1,132 @@
+views:
+  - title: Wiadomości
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: custom:mushroom-title-card
+            title: 📬 Wiadomości Librus
+            subtitle: >
+              {% set n = state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'liczba_nieprzeczytanych') %}
+              {% set p = (state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}) %}
+              {% if n > 0 %}{{ n }} nieprzeczytanych{% else %}Wszystkie przeczytane{% endif %}
+              · {% if p.najnowsze %}najnowsze{% else %}strona {{ p.strona }}, pozycje {{ p.od }}–{{ p.do }}{% endif %}
+            tap_action:
+              action: url
+              url_path: https://portal.librus.pl/rodzina/synergia/loguj
+          - type: custom:mushroom-template-card
+            primary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[0] | default({}) %}{{ m.temat | default('— brak —') }}
+            secondary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[0] | default({}) %}{{ m.nadawca | default('') }}{% if m.data %} · {{ m.data }}{% endif %}
+            icon: mdi:message-text
+            icon_color: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[0] | default({}) %}{% if m.nieprzeczytana or m.jest_nowa %}red{% else %}grey{% endif %}
+            badge_icon: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[0] | default({}) %}{% if m.ma_zalacznik %}mdi:paperclip{% endif %}
+            tap_action:
+              action: perform-action
+              perform_action: librus_apix.pobierz_tresc
+              data:
+                indeks: 0
+          - type: custom:mushroom-template-card
+            primary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[1] | default({}) %}{{ m.temat | default('— brak —') }}
+            secondary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[1] | default({}) %}{{ m.nadawca | default('') }}{% if m.data %} · {{ m.data }}{% endif %}
+            icon: mdi:message-text
+            icon_color: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[1] | default({}) %}{% if m.nieprzeczytana or m.jest_nowa %}red{% else %}grey{% endif %}
+            badge_icon: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[1] | default({}) %}{% if m.ma_zalacznik %}mdi:paperclip{% endif %}
+            tap_action:
+              action: perform-action
+              perform_action: librus_apix.pobierz_tresc
+              data:
+                indeks: 1
+          - type: custom:mushroom-template-card
+            primary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[2] | default({}) %}{{ m.temat | default('— brak —') }}
+            secondary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[2] | default({}) %}{{ m.nadawca | default('') }}{% if m.data %} · {{ m.data }}{% endif %}
+            icon: mdi:message-text
+            icon_color: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[2] | default({}) %}{% if m.nieprzeczytana or m.jest_nowa %}red{% else %}grey{% endif %}
+            badge_icon: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[2] | default({}) %}{% if m.ma_zalacznik %}mdi:paperclip{% endif %}
+            tap_action:
+              action: perform-action
+              perform_action: librus_apix.pobierz_tresc
+              data:
+                indeks: 2
+          - type: custom:mushroom-template-card
+            primary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[3] | default({}) %}{{ m.temat | default('— brak —') }}
+            secondary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[3] | default({}) %}{{ m.nadawca | default('') }}{% if m.data %} · {{ m.data }}{% endif %}
+            icon: mdi:message-text
+            icon_color: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[3] | default({}) %}{% if m.nieprzeczytana or m.jest_nowa %}red{% else %}grey{% endif %}
+            badge_icon: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[3] | default({}) %}{% if m.ma_zalacznik %}mdi:paperclip{% endif %}
+            tap_action:
+              action: perform-action
+              perform_action: librus_apix.pobierz_tresc
+              data:
+                indeks: 3
+          - type: custom:mushroom-template-card
+            primary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[4] | default({}) %}{{ m.temat | default('— brak —') }}
+            secondary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[4] | default({}) %}{{ m.nadawca | default('') }}{% if m.data %} · {{ m.data }}{% endif %}
+            icon: mdi:message-text
+            icon_color: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[4] | default({}) %}{% if m.nieprzeczytana or m.jest_nowa %}red{% else %}grey{% endif %}
+            badge_icon: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'przegladanie') or {}).wiadomosci or [])[4] | default({}) %}{% if m.ma_zalacznik %}mdi:paperclip{% endif %}
+            tap_action:
+              action: perform-action
+              perform_action: librus_apix.pobierz_tresc
+              data:
+                indeks: 4
+          - type: horizontal-stack
+            cards:
+              - type: custom:mushroom-template-card
+                primary: Nowsze
+                icon: mdi:chevron-left
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj
+                  data:
+                    kierunek: poprzednia
+              - type: custom:mushroom-template-card
+                primary: Najnowsze
+                icon: mdi:page-first
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj
+                  data:
+                    kierunek: najnowsze
+              - type: custom:mushroom-template-card
+                primary: Starsze
+                icon: mdi:chevron-right
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj
+                  data:
+                    kierunek: nastepna
+          - type: markdown
+            title: 📖 Treść wiadomości
+            content: |
+              {%- set o = state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'otwarta') or {} -%}
+              {%- if o.temat -%}
+              ### {{ o.temat }}
+              _{{ o.nadawca }} · {{ o.data }}{{ ' · 📎 załącznik' if o.ma_zalacznik else '' }}_
+
+              {{ o.tresc | replace('\n', '  \n') }}
+              {%- else -%}
+              _Kliknij wiadomość na liście powyżej, aby pobrać i zobaczyć jej treść. Strzałkami przejdziesz do starszych._
+              _(Uwaga: otwarcie oznacza wiadomość w Librusie jako przeczytaną.)_
+              {%- endif -%}

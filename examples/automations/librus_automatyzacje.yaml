@@ -1,0 +1,239 @@
+# Automatyzacje powiadomień Librus -> notify.mobile_app_TWOJ_TELEFON (ttl: 0, priority: high)
+# Wklej do automations.yaml albo pojedynczo: Ustawienia > Automatyzacje > Utwórz > ⋮ > Edytuj w YAML.
+# Składnia: HA 2024.10+ (triggers/conditions/actions, "action:"). Starsze wersje: trigger/condition/action + "service:".
+
+# 1) Nowe ZADANIE (kategoria dokładnie "Zadanie")
+- id: librus_nowe_zadanie
+  alias: "Librus - nowe zadanie"
+  description: "Powiadomienie o nowym wpisie w zadaniach, gdy kategoria to 'Zadanie'."
+  mode: queued
+  max: 10
+  variables:
+    kategoria_zadania: "zadanie"   # porównanie bez wielkości liter; sprawdź swoją wartość w atrybucie 'kategorie' sensora Zadania
+  triggers:
+    - trigger: event
+      event_type: librus_apix_nowe_zadanie
+  conditions:
+    - condition: template
+      value_template: "{{ (trigger.event.data.kategoria | default('') | trim | lower) == kategoria_zadania }}"
+  actions:
+    - action: notify.mobile_app_TWOJ_TELEFON
+      data:
+        title: "📝 Nowe zadanie: {{ trigger.event.data.przedmiot }}"
+        message: >-
+          {{ trigger.event.data.kategoria }} · termin: {{ trigger.event.data.termin }}
+          {%- if trigger.event.data.nauczyciel %} · {{ trigger.event.data.nauczyciel }}{% endif %}
+        data:
+          ttl: 0
+          priority: high
+
+# 2) Nowe ZADANIE DOMOWE (każda kategoria inna niż "Zadanie")
+- id: librus_nowe_zadanie_domowe
+  alias: "Librus - nowe zadanie domowe"
+  description: "Powiadomienie o nowym wpisie w zadaniach, gdy kategoria jest inna niż 'Zadanie'."
+  mode: queued
+  max: 10
+  variables:
+    kategoria_zadania: "zadanie"
+  triggers:
+    - trigger: event
+      event_type: librus_apix_nowe_zadanie
+  conditions:
+    - condition: template
+      value_template: "{{ (trigger.event.data.kategoria | default('') | trim | lower) != kategoria_zadania }}"
+  actions:
+    - action: notify.mobile_app_TWOJ_TELEFON
+      data:
+        title: "📚 Nowe zadanie domowe: {{ trigger.event.data.przedmiot }}"
+        message: >-
+          {{ trigger.event.data.kategoria }} · termin: {{ trigger.event.data.termin }}
+          {%- if trigger.event.data.nauczyciel %} · {{ trigger.event.data.nauczyciel }}{% endif %}
+        data:
+          ttl: 0
+          priority: high
+
+# 3) Nowa NIEOBECNOŚĆ (nieusprawiedliwiona, "nb")
+# Reaguje na wzrost licznika sensora Nieobecnosci, więc przy kilku lekcjach naraz
+# przychodzi JEDNO powiadomienie z listą (a nie jedno na lekcję).
+- id: librus_nowa_nieobecnosc
+  alias: "Librus - nowa nieobecność"
+  description: "Powiadomienie, gdy przybędzie nieusprawiedliwionych nieobecności."
+  mode: queued
+  max: 5
+  triggers:
+    - trigger: state
+      entity_id: sensor.librus_imie_nazwisko_nieobecnosci
+  conditions:
+    - condition: template
+      value_template: >-
+        {{ trigger.from_state is not none
+           and trigger.from_state.state not in ['unknown', 'unavailable']
+           and trigger.to_state.state not in ['unknown', 'unavailable']
+           and (trigger.to_state.state | int(0)) > (trigger.from_state.state | int(0)) }}
+  actions:
+    - variables:
+        przybylo: "{{ (trigger.to_state.state | int(0)) - (trigger.from_state.state | int(0)) }}"
+        nowe: "{{ (trigger.to_state.attributes.nieusprawiedliwione or [])[:(przybylo | int(1))] }}"
+    - action: notify.mobile_app_TWOJ_TELEFON
+      data:
+        title: "🚫 {{ 'Nowa nieobecność' if przybylo | int(1) == 1 else 'Nowe nieobecności: ' ~ przybylo }}"
+        message: >-
+          {%- for w in nowe -%}
+            {{ w.przedmiot }} ({{ w.godzina_lekcyjna }}. lekcja, {{ w.data }}){{ '; ' if not loop.last }}
+          {%- endfor -%}
+          {%- if not nowe -%}Sprawdź frekwencję w Librusie.{%- endif -%}
+        data:
+          ttl: 0
+          priority: high
+
+# 4) Koniec ostatniej lekcji wg planu - wyzwalacz na czujniku-znaczniku czasu (bez odpytywania co minute)
+- id: librus_koniec_ostatniej_lekcji
+  alias: "Librus - koniec ostatniej lekcji"
+  description: "O godzinie konca ostatniej (nieodwolanej) lekcji z dzisiejszego planu."
+  mode: single
+  triggers:
+    - trigger: time
+      at: sensor.librus_imie_nazwisko_koniec_lekcji_dzis
+  conditions:
+    - condition: template
+      value_template: "{{ states('sensor.librus_imie_nazwisko_koniec_lekcji_dzis') not in ['unknown', 'unavailable'] }}"
+  actions:
+    - variables:
+        lekcje: >-
+          {{ (state_attr('sensor.librus_imie_nazwisko_plan_lekcji_dzis', 'lekcje') or [])
+             | rejectattr('odwolana') | list }}
+        koniec: "{{ as_local(states('sensor.librus_imie_nazwisko_koniec_lekcji_dzis') | as_datetime).strftime('%H:%M') }}"
+    - action: notify.mobile_app_TWOJ_TELEFON
+      data:
+        title: "🏫 Koniec lekcji na dziś"
+        message: >-
+          {%- if lekcje -%}
+          Ostatnia lekcja ({{ lekcje[-1].numer }}. {{ lekcje[-1].przedmiot }}) skończyła się o {{ koniec }}.
+          {%- else -%}
+          Lekcje na dziś skończyły się o {{ koniec }}.
+          {%- endif -%}
+        data:
+          ttl: 0
+          priority: high
+
+# 5) Wylosowano szczęśliwy numerek ucznia
+- id: librus_szczesliwy_numerek_ucznia
+  alias: "Librus - szczęśliwy numerek ucznia"
+  description: "Powiadomienie, gdy szczęśliwy numerek zmieni się na numer ucznia."
+  mode: single
+  variables:
+    numerek_ucznia: "0"   # wpisz numer ucznia w dzienniku
+  triggers:
+    - trigger: state
+      entity_id: sensor.librus_imie_nazwisko_szczesliwy_numerek
+  conditions:
+    - condition: template
+      value_template: >-
+        {{ trigger.from_state is not none
+           and trigger.from_state.state not in ['unknown', 'unavailable']
+           and trigger.from_state.state != trigger.to_state.state
+           and trigger.to_state.state == numerek_ucznia }}
+  actions:
+    - action: notify.mobile_app_TWOJ_TELEFON
+      data:
+        title: "🍀 Szczęśliwy numerek!"
+        message: "Wylosowano szczęśliwy numerek ucznia: {{ numerek_ucznia }}"
+        data:
+          ttl: 0
+          priority: high
+
+# 6) Nowa OCENA (z wagą i komentarzem)
+- id: librus_nowa_ocena
+  alias: "Librus - nowa ocena"
+  description: "Powiadomienie o nowej ocenie wraz z wagą, kategorią i komentarzem."
+  mode: queued
+  max: 10
+  triggers:
+    - trigger: event
+      event_type: librus_apix_nowa_ocena
+  actions:
+    - action: notify.mobile_app_TWOJ_TELEFON
+      data:
+        title: "⭐ Nowa ocena: {{ trigger.event.data.przedmiot }} – {{ trigger.event.data.ocena }}"
+        message: >-
+          {{ trigger.event.data.kategoria }}
+          {%- if trigger.event.data.waga %} · waga {{ trigger.event.data.waga }}{% endif %}
+          {%- if trigger.event.data.liczy_sie == false %} · nie liczy się do średniej{% endif %}
+          {%- if trigger.event.data.komentarz %} · {{ trigger.event.data.komentarz }}{% endif %}
+          {%- if trigger.event.data.nauczyciel %} · {{ trigger.event.data.nauczyciel }}{% endif %}
+        data:
+          ttl: 0
+          priority: high
+
+# 7) Nowe OGŁOSZENIE szkoły
+- id: librus_nowe_ogloszenie
+  alias: "Librus - nowe ogłoszenie"
+  description: "Powiadomienie o nowym ogłoszeniu w Librusie."
+  mode: queued
+  max: 5
+  triggers:
+    - trigger: event
+      event_type: librus_apix_nowe_ogloszenie
+  actions:
+    - action: notify.mobile_app_TWOJ_TELEFON
+      data:
+        title: "📢 Ogłoszenie: {{ trigger.event.data.tytul }}"
+        message: >-
+          {{ trigger.event.data.tresc | replace('\n', ' ') | truncate(300) }}
+          {%- if trigger.event.data.autor %} — {{ trigger.event.data.autor }}{% endif %}
+        data:
+          ttl: 0
+          priority: high
+
+# 8) Przypomnienie wieczorem (18:00) o sprawdzianach i zadaniach domowych na JUTRO
+# Wyzwalane z kalendarza "Terminarz i zadania": wydarzenia całodniowe zaczynają się o 00:00, offset -6h = 18:00 dzień wcześniej.
+- id: librus_przypomnienie_na_jutro
+  alias: "Librus - przypomnienie o terminach na jutro"
+  description: "O 18:00 dzień przed terminem sprawdzianu lub oddania zadania domowego."
+  mode: queued
+  max: 10
+  triggers:
+    - trigger: calendar
+      event: start
+      entity_id: calendar.librus_imie_nazwisko_terminarz_i_zadania
+      offset: "-6:00:00"
+  actions:
+    - action: notify.mobile_app_TWOJ_TELEFON
+      data:
+        title: "⏰ Jutro: {{ trigger.calendar_event.summary }}"
+        message: "{{ (trigger.calendar_event.description or 'Brak dodatkowych informacji.') | replace('\n', ' · ') | truncate(300) }}"
+        data:
+          ttl: 0
+          priority: high
+
+# 9) Nowa WIADOMOŚĆ - dane bierzemy ze ZDARZENIA (trigger.event.data), a nie z czujnika.
+# Przykład z README integracji czyta czujnik, który w chwili zdarzenia ma jeszcze starą listę -> "nieznany".
+# Jeśli masz starą automatyzację o nowej wiadomości, usuń ją albo podmień na tę.
+- id: librus_nowa_wiadomosc
+  alias: "Librus - nowa wiadomość"
+  description: "Powiadomienie o nowej wiadomości (nadawca, temat); sprawdzanie co kilka minut."
+  mode: queued
+  max: 10
+  triggers:
+    - trigger: event
+      event_type: librus_apix_nowa_wiadomosc
+  actions:
+    - action: notify.mobile_app_TWOJ_TELEFON
+      data:
+        title: "📬 Nowa wiadomość: {{ trigger.event.data.temat or '(bez tematu)' }}"
+        message: |-
+          Od: {{ trigger.event.data.nadawca or 'nieznany' }}{% if trigger.event.data.ma_zalacznik %} · 📎 załącznik{% endif %}{% if trigger.event.data.data %} · {{ trigger.event.data.data }}{% endif %}
+          {%- if trigger.event.data.tresc %}
+
+          {{ trigger.event.data.tresc | truncate(800) }}
+          {%- else %}
+
+          Dotknij, aby otworzyć wiadomości.
+          {%- endif %}
+        data:
+          ttl: 0
+          priority: high
+          # Dotknięcie powiadomienia otwiera widok Wiadomości (zmień ścieżkę na swoją).
+          # Android: clickAction, iOS: url. Treść pobierzesz klikając wiadomość na liście.
+          clickAction: /librus-wiadomosci/0
+          url: /librus-wiadomosci/0

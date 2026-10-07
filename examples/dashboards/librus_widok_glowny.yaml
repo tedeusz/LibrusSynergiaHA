@@ -1,0 +1,67 @@
+# Widok główny z kafelkami przechodzącymi do pozostałych dashboardów.
+# Wymaga: HA 2023.1+. Ścieżki /librus-.../0 dopasuj do nazw swoich pulpitów
+# (adres pulpitu = ścieżka po / w pasku adresu przeglądarki).
+# Nazwy encji: zamień "librus_imie_nazwisko" na swoje (Narzędzia deweloperskie → Stany).
+views:
+  - title: Librus
+    cards:
+      - type: entities
+        entities:
+          - entity: sensor.librus_imie_nazwisko_frekwencja
+            name: Frekwencja
+          - entity: sensor.librus_imie_nazwisko_aktualna_lekcja
+            name: Aktualna lekcja
+          - entity: sensor.librus_imie_nazwisko_szczesliwy_numerek
+            name: Szczęśliwy numerek
+      - type: grid
+        columns: 2
+        square: false
+        cards:
+          - type: button
+            name: Ogłoszenia szkoły
+            icon: mdi:bullhorn
+            tap_action:
+              action: navigate
+              navigation_path: /librus-overview/szkola
+          - type: button
+            name: Wiadomości
+            icon: mdi:email-fast-outline
+            tap_action:
+              action: navigate
+              navigation_path: /librus-wiadomosci/0
+          - type: button
+            name: Terminarz
+            icon: mdi:calendar-clock-outline
+            tap_action:
+              action: navigate
+              navigation_path: /librus-terminarz/0
+          - type: button
+            name: Sprawdziany
+            icon: mdi:file-document-edit-outline
+            tap_action:
+              action: navigate
+              navigation_path: /librus-sprawdziany/0
+          - type: button
+            name: Plan lekcji
+            icon: mdi:timetable
+            tap_action:
+              action: navigate
+              navigation_path: /librus-plan-lekcji/0
+          - type: button
+            name: Zadania
+            icon: mdi:notebook-edit
+            tap_action:
+              action: navigate
+              navigation_path: /librus-zadania/0
+          - type: button
+            name: Oceny
+            icon: mdi:chart-box-outline
+            tap_action:
+              action: navigate
+              navigation_path: /librus-oceny/0
+          - type: button
+            name: Frekwencja
+            icon: mdi:account-check
+            tap_action:
+              action: navigate
+              navigation_path: /librus-frekwencja/0

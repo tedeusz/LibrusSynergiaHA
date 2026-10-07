@@ -1,0 +1,53 @@
+title: Librus szkoła
+views:
+  - title: Szkoła
+    path: szkola
+    icon: mdi:school
+    cards:
+      - type: markdown
+        title: 📢 Ogłoszenia
+        content: |-
+          {%- set p = state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {} -%}
+          {%- set lista = p.ogloszenia or [] -%}
+          {%- if not lista -%}
+          Brak ogłoszeń.
+          {%- else -%}
+          _Pozycje {{ p.od }}–{{ p.do }} z {{ p.razem }}{{ ' (najnowsze)' if p.najnowsze else '' }}_
+          {%- for o in lista %}
+
+          {{ '🆕 ' if o.jest_nowe else '' }}**{{ o.tytul }}** · {{ o.data }} · _{{ o.autor }}_
+
+          {{ o.tresc | replace('\r', ' ') | replace('\n', ' ') | truncate(250) }}
+
+          ---
+          {%- endfor %}
+          {%- endif -%}
+      - type: horizontal-stack
+        cards:
+          - type: custom:mushroom-template-card
+            primary: Nowsze
+            icon: mdi:chevron-left
+            layout: vertical
+            tap_action:
+              action: perform-action
+              perform_action: librus_apix.przegladaj_ogloszenia
+              data:
+                kierunek: poprzednia
+          - type: custom:mushroom-template-card
+            primary: Najnowsze
+            icon: mdi:page-first
+            layout: vertical
+            tap_action:
+              action: perform-action
+              perform_action: librus_apix.przegladaj_ogloszenia
+              data:
+                kierunek: najnowsze
+          - type: custom:mushroom-template-card
+            primary: Starsze
+            icon: mdi:chevron-right
+            layout: vertical
+            tap_action:
+              action: perform-action
+              perform_action: librus_apix.przegladaj_ogloszenia
+              data:
+                kierunek: nastepna

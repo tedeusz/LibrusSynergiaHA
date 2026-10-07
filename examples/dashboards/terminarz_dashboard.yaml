@@ -1,0 +1,138 @@
+# Dashboard "Terminarz" dla integracji Librus APIX (zastępuje stary widok z tabelką HTML).
+# Wklej: Ustawienia > Pulpity > (pulpit) > Edytuj > ⋮ > Edytor YAML - tylko DWA elementy listy spod "views:".
+# Encja: sensor.librus_imie_nazwisko_terminarz (jeśli u Ciebie inna - zmień w pierwszej linii każdego szablonu).
+# Zdarzenia są rozpoznawane po stronie integracji: 🔴 sprawdzian, 🟠 kartkówka, 🟣 nieobecność nauczyciela,
+# 🟡 zastępstwo, 🟢 dzień wolny, 🚌 wycieczka, 👥 zebranie, 🔵 zadanie, 📌 inne wydarzenie.
+title: Librus terminarz
+views:
+  - title: Terminarz
+    path: terminarz
+    icon: mdi:calendar-month
+    type: panel
+    cards:
+      - type: vertical-stack
+        cards:
+          # --- Podsumowanie ---
+          - type: markdown
+            content: |
+              {%- set e = 'sensor.librus_imie_nazwisko_terminarz' -%}
+              {%- if states(e) in ['unknown', 'unavailable'] -%}
+              Brak danych z terminarza.
+              {%- else -%}
+              📅 **Dziś: {{ state_attr(e, 'liczba_dzis') }}** · w ciągu 7 dni: **{{ state_attr(e, 'liczba_7_dni') }}** · razem w terminarzu: **{{ state_attr(e, 'liczba_zdarzen') }}**
+              {%- set testy = state_attr(e, 'najblizsze_testy') or [] -%}
+              {%- if testy %}
+
+              {% for t in testy[:3] -%}
+              {{ t.ikona }} **{{ t.etykieta_dnia }}** · {{ t.etykieta }}: {{ t.opis }}{% if t.dodatkowy %} _({{ t.dodatkowy }})_{% endif %}
+              {% endfor %}
+              {%- endif %}
+              {%- endif -%}
+
+          # --- Kolejne dni ze zdarzeniami (5 na ekran, przyciski poniżej) ---
+          - type: markdown
+            title: 🗓️ Terminarz
+            content: |
+              {%- set e = 'sensor.librus_imie_nazwisko_terminarz' -%}
+              {%- set p = state_attr(e, 'przegladanie') or {} -%}
+              {%- set dni = p.wg_dni or [] -%}
+              {%- if not dni -%}
+              ✅ Brak zdarzeń w terminarzu.
+              {%- else -%}
+              _Dni {{ p.od }}–{{ p.do }} z {{ p.razem }} ze zdarzeniami{{ ' (najbliższe)' if p.najnowsze else '' }}_
+              {%- for d in dni %}
+              {%- set kolor = '🔴' if d.dni_do == 0 else '🟠' if d.dni_do == 1 else '🟡' if d.dni_do <= 3 else '🟢' %}
+
+              ### {{ kolor }} {{ d.etykieta }} · {{ d.dzien }} {{ d.data[8:10] }}.{{ d.data[5:7] }}
+              {%- for z in d.zdarzenia %}
+              - {{ z.ikona }} **{{ z.etykieta }}**{% if z.numer_lekcji %} · lekcja {{ z.numer_lekcji }}{% elif z.godzina %} · {{ z.godzina }}{% endif %}{% if z.opis %} · {{ z.opis }}{% endif %}{% if z.dodatkowy %} — _{{ z.dodatkowy | replace('\r', ' ') | replace('\n', ' ') | truncate(300) }}_{% endif %}
+              {%- endfor %}
+              {%- endfor %}
+              {%- endif -%}
+          - type: horizontal-stack
+            cards:
+              - type: custom:mushroom-template-card
+                primary: Wcześniejsze
+                icon: mdi:chevron-left
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_terminarz
+                  data:
+                    kierunek: poprzednia
+              - type: custom:mushroom-template-card
+                primary: Najbliższe
+                icon: mdi:page-first
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_terminarz
+                  data:
+                    kierunek: najnowsze
+              - type: custom:mushroom-template-card
+                primary: Późniejsze
+                icon: mdi:chevron-right
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_terminarz
+                  data:
+                    kierunek: nastepna
+
+  - title: Sprawdziany i zmiany
+    path: sprawdziany-i-zmiany
+    icon: mdi:clipboard-text-clock
+    type: panel
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: markdown
+            title: 📝 Sprawdziany i kartkówki
+            content: |
+              {%- set e = 'sensor.librus_imie_nazwisko_terminarz' -%}
+              {%- set ns = namespace(n=0) -%}
+              {%- for d in state_attr(e, 'wg_dni') or [] %}{% for z in d.zdarzenia if z.typ in ['sprawdzian', 'kartkowka'] %}
+              {%- set ns.n = ns.n + 1 %}
+              {%- if ns.n == 1 %}
+              | Kiedy | Rodzaj | Przedmiot / opis |
+              |:--|:--|:--|
+              {%- endif %}
+              | **{{ d.etykieta }}** · {{ d.dzien }} {{ d.data[8:10] }}.{{ d.data[5:7] }} | {{ z.ikona }} {{ z.etykieta }} | {{ z.opis }}{% if z.dodatkowy %} _({{ z.dodatkowy | replace('\n', ' ') | truncate(120) }})_{% endif %} |
+              {%- endfor %}{% endfor %}
+              {%- if ns.n == 0 -%}
+              ✅ Brak zapowiedzianych sprawdzianów i kartkówek.
+              {%- endif -%}
+
+          - type: markdown
+            title: 🔄 Zmiany w planie (zastępstwa i nieobecności nauczycieli)
+            content: |
+              {%- set e = 'sensor.librus_imie_nazwisko_terminarz' -%}
+              {%- set ns = namespace(n=0) -%}
+              {%- for d in state_attr(e, 'wg_dni') or [] %}{% for z in d.zdarzenia if z.typ in ['zastepstwo', 'nieobecnosc_nauczyciela'] %}
+              {%- set ns.n = ns.n + 1 %}
+              {%- if ns.n == 1 %}
+              | Kiedy | Zmiana | Szczegóły |
+              |:--|:--|:--|
+              {%- endif %}
+              | **{{ d.etykieta }}** · {{ d.dzien }} {{ d.data[8:10] }}.{{ d.data[5:7] }} | {{ z.ikona }} {{ z.etykieta }}{% if z.numer_lekcji %} · lekcja {{ z.numer_lekcji }}{% endif %} | {{ z.opis }} |
+              {%- endfor %}{% endfor %}
+              {%- if ns.n == 0 -%}
+              ✅ Brak zmian w planie.
+              {%- endif -%}
+
+          - type: markdown
+            title: 🎌 Dni wolne i wydarzenia szkolne
+            content: |
+              {%- set e = 'sensor.librus_imie_nazwisko_terminarz' -%}
+              {%- set ns = namespace(n=0) -%}
+              {%- for d in state_attr(e, 'wg_dni') or [] %}{% for z in d.zdarzenia if z.typ in ['wolne', 'wycieczka', 'zebranie', 'wydarzenie', 'zadanie'] %}
+              {%- set ns.n = ns.n + 1 %}
+              {%- if ns.n == 1 %}
+              | Kiedy | Rodzaj | Opis |
+              |:--|:--|:--|
+              {%- endif %}
+              | **{{ d.etykieta }}** · {{ d.dzien }} {{ d.data[8:10] }}.{{ d.data[5:7] }} | {{ z.ikona }} {{ z.etykieta }} | {{ z.opis }} |
+              {%- endfor %}{% endfor %}
+              {%- if ns.n == 0 -%}
+              Brak zapowiedzianych wydarzeń.
+              {%- endif -%}

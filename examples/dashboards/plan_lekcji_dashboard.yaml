@@ -1,0 +1,119 @@
+# Dashboard "Plan lekcji" dla integracji Librus APIX
+# Wklej: Ustawienia > Pulpity > (pulpit) > Edytuj > ⋮ > Edytor YAML (Raw configuration editor)
+# Wymaga czujnikow sensor.librus_imie_nazwisko_aktualna_lekcja i ..._tematy_lekcji (nowa wersja integracji).
+# Przy zrealizowanych lekcjach pokazuje temat (Librus udostepnia tematy z ostatnich ~4 dni).
+title: Librus
+views:
+  - title: Plan lekcji
+    path: plan-lekcji
+    icon: mdi:timetable
+    type: panel
+    cards:
+      - type: vertical-stack
+        cards:
+          # --- Podsumowanie: teraz, dziś i następny dzień ---
+          - type: markdown
+            content: |
+              {%- set dzis = 'sensor.librus_imie_nazwisko_plan_lekcji_dzis' -%}
+              {%- set nast = 'sensor.librus_imie_nazwisko_plan_lekcji_nastepny_dzien' -%}
+              {%- set akt = 'sensor.librus_imie_nazwisko_aktualna_lekcja' -%}
+              {%- macro opis(e) -%}
+                {%- if states(e) in ['unknown', 'unavailable'] -%}
+                brak danych
+                {%- elif states(e) | int(0) == 0 -%}
+                brak lekcji
+                {%- else -%}
+                **{{ states(e) }}** lekcji · {{ state_attr(e, 'pierwsza_lekcja_od') }}–{{ state_attr(e, 'ostatnia_lekcja_do') }}
+                {%- endif -%}
+              {%- endmacro -%}
+              {%- if state_attr(akt, 'numer') is not none -%}
+              🟢 **Teraz:** {{ states(akt) }} ({{ state_attr(akt, 'od') }}–{{ state_attr(akt, 'do') }}){% if state_attr(akt, 'nastepna_lekcja') %} · następna: **{{ state_attr(akt, 'nastepna_lekcja') }}** o {{ state_attr(akt, 'nastepna_od') }}{% endif %}
+              {%- elif state_attr(akt, 'nastepna_lekcja') -%}
+              ⏸️ **Przerwa** · następna: **{{ state_attr(akt, 'nastepna_lekcja') }}** o {{ state_attr(akt, 'nastepna_od') }}
+              {%- else -%}
+              ⚪ **Teraz:** brak lekcji
+              {%- endif %}
+
+              📍 **Dziś** ({{ state_attr(dzis, 'dzien_tygodnia') or '' }}): {{ opis(dzis) }}
+
+              ➡️ **Następny dzień nauki**{% if state_attr(nast, 'data') %} ({{ state_attr(nast, 'dzien_tygodnia') }} {{ as_datetime(state_attr(nast, 'data')).strftime('%d.%m') }}){% endif %}: {{ opis(nast) }}
+
+          # --- Plan tygodnia (z zaznaczoną trwającą lekcją) ---
+          - type: markdown
+            title: 🗓️ Plan lekcji
+            content: |
+              {%- set e = 'sensor.librus_imie_nazwisko_plan_lekcji_tydzien' -%}
+              {%- set akt_nr = state_attr('sensor.librus_imie_nazwisko_aktualna_lekcja', 'numer') -%}
+              {%- set p = state_attr(e, 'przegladanie') or {} -%}
+              {%- set plan = p.plan or {} -%}
+              {%- set dzis = now().date() -%}
+              {%- set skroty = ['Pon', 'Wt', 'Śr', 'Czw', 'Pt', 'Sob', 'Ndz'] -%}
+              {%- set tematy = state_attr('sensor.librus_imie_nazwisko_tematy_lekcji', 'wg_dni') or {} -%}
+              {%- if not plan -%}
+              Brak danych planu lekcji na ten tydzień{% if p.od %} ({{ p.od[8:10] }}.{{ p.od[5:7] }}–{{ p.do[8:10] }}.{{ p.do[5:7] }}){% endif %}. Użyj przycisków poniżej, aby zmienić tydzień.
+              {%- else -%}
+              {%- set przes = p.przesuniecie | int(0) -%}
+              _Tydzień {{ p.od[8:10] }}.{{ p.od[5:7] }}–{{ p.do[8:10] }}.{{ p.do[5:7] }} · {{ 'bieżący' if przes == 0 else 'za 1 tydzień' if przes == 1 else 'za ' ~ przes ~ ' tyg.' if przes > 0 else '1 tydzień temu' if przes == -1 else (przes | abs) ~ ' tyg. temu' }}{% if p.liczba_zmian %} · zmian: {{ p.liczba_zmian }}{% endif %}_
+              {%- for d in plan.keys() | list | sort %}
+              {%- set dt = as_datetime(d).date() %}
+              {%- set roznica = (dt - dzis).days %}
+              {%- set kolor = '⚪' if roznica < 0 else '🔴' if roznica == 0 else '🟠' if roznica == 1 else '🟡' if roznica <= 3 else '🟢' %}
+              {%- set etykieta = 'Dziś' if roznica == 0 else 'Jutro' if roznica == 1 else 'Wczoraj' if roznica == -1 else 'Za ' ~ roznica ~ ' dni' if roznica > 1 else (roznica | abs) ~ ' dni temu' %}
+              {%- set lekcje = plan[d] %}
+              {%- set aktywne = lekcje | rejectattr('odwolana') | list %}
+
+              ### {{ kolor }} {{ etykieta }} · {{ skroty[dt.weekday()] }} {{ dt.strftime('%d.%m') }}{% if aktywne %} · {{ aktywne | length }} {{ 'lekcja' if aktywne | length == 1 else 'lekcje' if aktywne | length in [2, 3, 4] else 'lekcji' }} · {{ aktywne[0].od }}–{{ aktywne[-1].do }}{% endif %}
+              {%- if not lekcje %}
+              - _Brak lekcji_
+              {%- endif %}
+              {%- for l in lekcje %}
+              {%- set tm = namespace(t='') %}
+              {%- if not l.odwolana %}
+              {%- for x in tematy.get(d, []) %}
+              {%- if not tm.t and (x.numer | string) == (l.numer | string) %}{% set tm.t = '<br>📖 <i>' ~ x.temat ~ '</i>' %}{% endif %}
+              {%- endfor %}
+              {%- endif %}
+              {%- set trwa = (roznica == 0 and akt_nr is not none and l.numer == akt_nr and not l.odwolana) %}
+              {%- if l.odwolana %}
+              - ❌ **{{ l.numer }}** · {{ l.od }}–{{ l.do }} · ~~{{ l.przedmiot }}~~ _({{ l.zmiana | lower }})_
+              {%- elif l.zmiana %}
+              - {{ '🟢' if trwa else '🔄' }} **{{ l.numer }}** · {{ l.od }}–{{ l.do }} · **{{ l.przedmiot_zastepczy if l.przedmiot_zastepczy is defined else l.przedmiot }}** — _{{ l.zmiana | lower }}{% if l.zastepca is defined %}: {{ l.zastepca }}{% endif %}{% if l.sala_zastepcza is defined %} · sala {{ l.sala_zastepcza }}{% endif %}_{{ tm.t }}
+              {%- elif trwa %}
+              - 🟢 **{{ l.numer }}** · {{ l.od }}–{{ l.do }} · **{{ l.przedmiot }}** _(trwa teraz)_{{ tm.t }}
+              {%- else %}
+              - **{{ l.numer }}** · {{ l.od }}–{{ l.do }} · {{ l.przedmiot }}{{ tm.t }}
+              {%- endif %}
+              {%- endfor %}
+              {%- endfor %}
+
+              <small>🟢 trwa teraz · ❌ odwołane · 🔄 zmiana / zastępstwo · 📖 temat lekcji</small>
+              {%- endif -%}
+          - type: horizontal-stack
+            cards:
+              - type: custom:mushroom-template-card
+                primary: Poprzedni tydzień
+                icon: mdi:chevron-left
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_plan
+                  data:
+                    kierunek: poprzedni
+              - type: custom:mushroom-template-card
+                primary: Bieżący
+                icon: mdi:page-first
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_plan
+                  data:
+                    kierunek: biezacy
+              - type: custom:mushroom-template-card
+                primary: Następny tydzień
+                icon: mdi:chevron-right
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_plan
+                  data:
+                    kierunek: nastepny

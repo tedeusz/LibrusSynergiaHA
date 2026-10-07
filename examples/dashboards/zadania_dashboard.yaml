@@ -1,0 +1,108 @@
+# Dashboard "Zadania" dla integracji Librus APIX
+# Wklej: Ustawienia > Pulpity > (pulpit) > Edytuj > ⋮ > Edytor YAML.
+# Do istniejącego pulpitu (np. z planem lekcji) wklej tylko DWA elementy listy spod "views:".
+# Encje: sensor.librus_imie_nazwisko_zadania_domowe oraz sensor.librus_imie_nazwisko_zadania
+# (jeśli u Ciebie są inne - zmień je w pierwszych liniach każdego szablonu).
+title: Librus zadania
+views:
+  - title: Zadania domowe
+    path: zadania-domowe
+    icon: mdi:notebook-edit
+    type: panel
+    cards:
+      - type: vertical-stack
+        cards:
+          # --- Podsumowanie ---
+          - type: markdown
+            content: |
+              {%- set e = 'sensor.librus_imie_nazwisko_zadania_domowe' -%}
+              {%- if states(e) in ['unknown', 'unavailable'] -%}
+              Brak danych o zadaniach domowych.
+              {%- else -%}
+              📝 **Zadań w najbliższych 7 dniach: {{ states(e) }}** · na dziś: **{{ state_attr(e, 'liczba_na_dzis') }}** · na jutro: **{{ state_attr(e, 'liczba_na_jutro') }}**
+              {%- if state_attr(e, 'na_dzis') %}
+
+              🔴 **Na dziś:** {{ state_attr(e, 'na_dzis') | join(', ') }}
+              {%- endif %}
+              {%- if state_attr(e, 'na_jutro') %}
+
+              🟠 **Na jutro:** {{ state_attr(e, 'na_jutro') | join(', ') }}
+              {%- endif %}
+              {%- endif -%}
+
+          # --- Kolejne dni z zadaniami (5 na ekran, przyciski poniżej) ---
+          - type: markdown
+            title: 📚 Zadania domowe
+            content: |
+              {%- set e = 'sensor.librus_imie_nazwisko_zadania_domowe' -%}
+              {%- set p = state_attr(e, 'przegladanie') or {} -%}
+              {%- set dni = p.wg_dni or [] -%}
+              {%- if not dni -%}
+              ✅ Brak zadań domowych.
+              {%- else -%}
+              _Dni {{ p.od }}–{{ p.do }} z {{ p.razem }} z zadaniami{{ ' (najbliższe)' if p.najnowsze else '' }}_
+              {%- for d in dni %}
+              {%- set kolor = '🔴' if d.dni_do == 0 else '🟠' if d.dni_do == 1 else '🟡' if d.dni_do <= 3 else '🟢' %}
+
+              ### {{ kolor }} {{ d.etykieta }} · {{ d.dzien }} {{ d.data[8:10] }}.{{ d.data[5:7] }}
+              {%- for z in d.zadania %}
+              - **{{ z.przedmiot }}** · {{ z.kategoria }}{% if z.nauczyciel %} · _{{ z.nauczyciel }}_{% endif %}{% if z.tresc %}<br>{{ z.tresc | replace('\r', ' ') | replace('\n', ' ') | truncate(400) }}{% endif %}
+              {%- endfor %}
+              {%- endfor %}
+              {%- endif -%}
+          - type: horizontal-stack
+            cards:
+              - type: custom:mushroom-template-card
+                primary: Wcześniejsze
+                icon: mdi:chevron-left
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_zadania
+                  data:
+                    kierunek: poprzednia
+              - type: custom:mushroom-template-card
+                primary: Najbliższe
+                icon: mdi:page-first
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_zadania
+                  data:
+                    kierunek: najnowsze
+              - type: custom:mushroom-template-card
+                primary: Późniejsze
+                icon: mdi:chevron-right
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_zadania
+                  data:
+                    kierunek: nastepna
+
+  - title: Przegląd zadań
+    path: wszystkie-zadania
+    icon: mdi:clipboard-list
+    type: panel
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: markdown
+            title: 🗂️ Zadania wg przedmiotów
+            content: |
+              {%- set e = 'sensor.librus_imie_nazwisko_zadania_domowe' -%}
+              {%- set lista = state_attr('sensor.librus_imie_nazwisko_zadania', 'zadania') or [] -%}
+              {%- set przedmioty = state_attr(e, 'przedmioty') or [] -%}
+              {%- if not przedmioty -%}
+              ✅ Brak zadań z przyszłym terminem.
+              {%- else -%}
+              📝 **Razem: {{ lista | length }}**
+              {%- for k, n in (state_attr('sensor.librus_imie_nazwisko_zadania', 'kategorie') or {}).items() %} · {{ k or 'bez kategorii' }}: {{ n }}{% endfor %}
+
+              | Przedmiot | Zadań | Najbliższy termin |
+              |:--|:-:|:--|
+              {% for w in przedmioty -%}
+              {%- set kolor = '🔴' if w.najblizszy_dni == 0 else '🟠' if w.najblizszy_dni == 1 else '🟡' if w.najblizszy_dni <= 3 else '🟢' -%}
+              | **{{ w.przedmiot }}** | {{ w.liczba }} | {{ kolor }} {{ 'dziś' if w.najblizszy_dni == 0 else 'jutro' if w.najblizszy_dni == 1 else 'za ' ~ w.najblizszy_dni ~ ' dni' }} · {{ w.najblizszy_termin[8:10] }}.{{ w.najblizszy_termin[5:7] }} |
+              {% endfor %}
+              {%- endif -%}
