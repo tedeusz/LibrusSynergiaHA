@@ -105,6 +105,26 @@ przegladaj_plan:
       selector:
         text:
 
+przegladaj_frekwencje:
+  name: Przeglądaj frekwencję
+  description: Przesuwa ekran listy nieobecności, spóźnień i zwolnień o 5 wpisów (bez zapytań do Librusa).
+  fields:
+    kierunek:
+      name: Kierunek
+      required: true
+      example: nastepna
+      selector:
+        select:
+          options:
+            - nastepna
+            - poprzednia
+            - najnowsze
+    config_entry_id:
+      name: Wpis integracji
+      required: false
+      selector:
+        text:
+
 przegladaj_zadania:
   name: Przeglądaj zadania domowe
   description: Przesuwa ekran zadań domowych o 5 dni z zadaniami (bez zapytań do Librusa).

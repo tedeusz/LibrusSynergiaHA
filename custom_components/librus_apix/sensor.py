@@ -716,7 +716,7 @@ class LibrusFrekwencjaSensor(_LibrusSensor):
 class LibrusNieobecnosciSensor(_LibrusSensor):
     """Liczba nieusprawiedliwionych nieobecnosci w roku szkolnym + zestawienie wpisow."""
 
-    _unrecorded_attributes = frozenset({"ostatnie", "nieusprawiedliwione"})
+    _unrecorded_attributes = frozenset({"ostatnie", "nieusprawiedliwione", "przegladanie"})
 
     def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
         super().__init__(
@@ -753,6 +753,8 @@ class LibrusNieobecnosciSensor(_LibrusSensor):
             ),
             "nieusprawiedliwione": [_wpis_kompakt(w) for w in nieuspr[:20]],
             "ostatnie": [_wpis_kompakt(w) for w in bez_obecnosci[:10]],
+            # Aktualny ekran przegladania (usluga librus_apix.przegladaj_frekwencje) - cala lista
+            "przegladanie": self.coordinator.widok_frekwencji(),
         }
 
 

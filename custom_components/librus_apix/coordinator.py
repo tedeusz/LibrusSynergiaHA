@@ -755,6 +755,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._term_przesuniecie = 0
         self._zad_przesuniecie = 0
         self._oceny_przesuniecie = 0
+        self._frek_przesuniecie = 0
         self._plan_tydzien = 0  # przesuniecie widoku planu w tygodniach (0 = biezacy tydzien szkolny)
         self._plan_dodatkowy: Dict[str, List[Dict[str, Any]]] = {}  # dni spoza danych bazowych
         self._tresci_store: Optional[Store] = (
@@ -976,6 +977,43 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         else:
             return False
         self._term_przesuniecie = nowe
+        self.async_update_listeners()
+        return True
+
+    def _wpisy_frekwencji(self) -> List[Dict[str, Any]]:
+        """Wpisy frekwencji inne niz obecnosc (najnowsze pierwsze) - to, co pokazuje lista na ekranie."""
+        return [w for w in ((self.data or {}).get("obecnosc") or []) if w["symbol"] != SYMBOL_OBECNOSC]
+
+    def widok_frekwencji(self) -> Dict[str, Any]:
+        """Ekran frekwencji (ROZMIAR_WIDOKU wpisow) z calej listy; pozycje liczone od 1."""
+        lista = self._wpisy_frekwencji()
+        przes = min(self._frek_przesuniecie, max(0, len(lista) - 1))
+        czesc = lista[przes : przes + ROZMIAR_WIDOKU]
+        return {
+            "od": przes + 1 if czesc else 0,
+            "do": przes + len(czesc),
+            "razem": len(lista),
+            "najnowsze": przes == 0,
+            "wpisy": [_wpis_kompakt(w) for w in czesc],
+        }
+
+    def async_przegladaj_frekwencje(self, kierunek: str) -> bool:
+        """Przesun ekran frekwencji: "nastepna" (starsze), "poprzednia" (nowsze), "najnowsze"; bez zapytan."""
+        lista = self._wpisy_frekwencji()
+        przes = min(self._frek_przesuniecie, max(0, len(lista) - 1))
+        if kierunek == "najnowsze":
+            nowe = 0
+        elif kierunek == "nastepna":
+            nowe = przes + ROZMIAR_WIDOKU
+            if nowe >= len(lista):
+                return False
+        elif kierunek == "poprzednia":
+            if przes == 0:
+                return False
+            nowe = max(0, przes - ROZMIAR_WIDOKU)
+        else:
+            return False
+        self._frek_przesuniecie = nowe
         self.async_update_listeners()
         return True
 

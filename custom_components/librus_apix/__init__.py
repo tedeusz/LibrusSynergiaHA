@@ -1063,6 +1063,7 @@ _USLUGI = {
     "przegladaj_terminarz": ("async_przegladaj_terminarz", "kierunek", _KIERUNKI),
     "przegladaj_zadania": ("async_przegladaj_zadania", "kierunek", _KIERUNKI),
     "przegladaj_oceny": ("async_przegladaj_oceny", "kierunek", _KIERUNKI),
+    "przegladaj_frekwencje": ("async_przegladaj_frekwencje", "kierunek", _KIERUNKI),
     "przegladaj_plan": ("async_przegladaj_plan", "kierunek", ["nastepny", "poprzedni", "biezacy"]),
 }
 
