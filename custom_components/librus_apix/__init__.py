@@ -19,7 +19,7 @@ from librus_apix.exceptions import TokenError
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, SCAN_INTERVAL
-from .coordinator import LibrusDataUpdateCoordinator, _biezacy_semestr
+from .coordinator import LibrusDataUpdateCoordinator, UWZGLEDNIJ_OCENY_OPISOWE, _biezacy_semestr
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -138,7 +138,8 @@ class LibrusApiClient:
                             if desc_grade.semester != current_sem:
                                 continue
                             grade_val = desc_grade.grade.strip()
-                            if grade_val and (grade_val.replace('+', '').replace('-', '').isdigit() or
+                            if grade_val and (UWZGLEDNIJ_OCENY_OPISOWE or
+                                            grade_val.replace('+', '').replace('-', '').isdigit() or
                                             grade_val in ['1', '2', '3', '4', '5', '6', '1+', '1-', '2+', '2-',
                                                          '3+', '3-', '4+', '4-', '5+', '5-', '6+', '6-']):
                                 all_grades.append({
@@ -590,6 +591,27 @@ def _zarejestruj_uslugi(hass: HomeAssistant) -> None:
         DOMAIN,
         "przegladaj_zadania",
         _przegladaj_zadania,
+        schema=vol.Schema(
+            {
+                vol.Required("kierunek"): vol.In(["nastepna", "poprzednia", "najnowsze"]),
+                vol.Optional("config_entry_id"): str,
+            }
+        ),
+    )
+
+    async def _przegladaj_oceny(call) -> None:
+        coordinators = hass.data.get(DOMAIN, {}).get("coordinators", {})
+        entry_id = call.data.get("config_entry_id")
+        coordinator = (
+            coordinators.get(entry_id) if entry_id else next(iter(coordinators.values()), None)
+        )
+        if coordinator is not None:
+            coordinator.async_przegladaj_oceny(call.data["kierunek"])
+
+    hass.services.async_register(
+        DOMAIN,
+        "przegladaj_oceny",
+        _przegladaj_oceny,
         schema=vol.Schema(
             {
                 vol.Required("kierunek"): vol.In(["nastepna", "poprzednia", "najnowsze"]),

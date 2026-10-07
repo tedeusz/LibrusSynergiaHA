@@ -124,3 +124,23 @@ przegladaj_zadania:
       required: false
       selector:
         text:
+
+przegladaj_oceny:
+  name: Przeglądaj oceny
+  description: Przesuwa ekran listy ostatnich ocen o 8 pozycji (bez zapytań do Librusa).
+  fields:
+    kierunek:
+      name: Kierunek
+      required: true
+      example: nastepna
+      selector:
+        select:
+          options:
+            - nastepna
+            - poprzednia
+            - najnowsze
+    config_entry_id:
+      name: Wpis integracji
+      required: false
+      selector:
+        text:

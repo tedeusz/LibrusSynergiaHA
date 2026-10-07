@@ -166,6 +166,12 @@ def _build_srednie_librus(avg: Any) -> Dict[str, Dict[str, Optional[float]]]:
     }
 
 
+# Oceny opisowe / nieliczbowe (np. w klasach 1-3: "wzorowo", "+", opis slowny): True = pokazuj je
+# na liscie i w powiadomieniach (nie wchodza do srednich), False = tylko oceny liczbowe jak dotad.
+UWZGLEDNIJ_OCENY_OPISOWE = True
+# Ile ocen pokazuje jeden ekran listy "Ostatnie oceny".
+OCEN_NA_EKRANIE = 8
+
 # Pobieraj tresc zadan domowych (osobne zapytanie na kazde zadanie z terminem <= 7 dni).
 # Wylacz (False), jesli nie chcesz dodatkowych zapytan do Librusa.
 POBIERAJ_TRESC_ZADAN = True
@@ -451,6 +457,72 @@ def _tresc_zadania(szczegoly: Optional[Dict[str, str]]) -> Optional[str]:
     return None
 
 
+def _ikona_oceny(ocena: Any) -> str:
+    """Kolorowa kropka wg oceny: 5-6 zielona, 4 niebieska, 3 zolta, 2 pomaranczowa, 1 czerwona, opisowa 💬."""
+    return {"6": "🟢", "5": "🟢", "4": "🔵", "3": "🟡", "2": "🟠", "1": "🔴"}.get(
+        str(ocena or "").strip()[:1], "💬"
+    )
+
+
+def _oceny_chronologicznie(oceny: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Oceny od najstarszej do najnowszej (bez daty na poczatku; stabilnie)."""
+    return sorted(oceny, key=lambda g: (_parse_date(g.get("data")) or date.min))
+
+
+def _trend_przedmiotu(oceny: List[Dict[str, Any]]) -> Optional[str]:
+    """Strzalka: jak ostatnia ocena zmienila srednia wazona przedmiotu (↗ ↘ →); None gdy za malo danych."""
+    liczbowe = [g for g in _oceny_chronologicznie(oceny) if _wartosc_oceny(g.get("ocena", "")) is not None]
+    if len(liczbowe) < 2:
+        return None
+    przed, po = _srednia_wazona(liczbowe[:-1]), _srednia_wazona(liczbowe)
+    if przed is None or po is None:
+        return None
+    return "↗" if po - przed > 0.04 else "↘" if przed - po > 0.04 else "→"
+
+
+def _oceny_wg_przedmiotow(
+    wg_przedmiotu: Dict[str, List[Dict[str, Any]]], srednie_librus: Dict[str, Any], semestr: Optional[int]
+) -> List[Dict[str, Any]]:
+    """Wiersze tabeli przedmiotow: oceny jako kolorowe plakietki, srednia, srednia Librusa, trend."""
+    klucz_sem = "semestr_2" if semestr == 2 else "semestr_1"
+    wynik = []
+    for przedmiot, oceny in sorted(wg_przedmiotu.items()):
+        chrono = _oceny_chronologicznie(oceny)
+        wynik.append({
+            "przedmiot": przedmiot,
+            "liczba": len(oceny),
+            "oceny": [{"ocena": g.get("ocena", ""), "ikona": _ikona_oceny(g.get("ocena")), "nowa": bool(g.get("jest_nowa"))} for g in chrono],
+            "srednia": _srednia_wazona(oceny),
+            "srednia_librus": ((srednie_librus or {}).get(przedmiot) or {}).get(klucz_sem),
+            "trend": _trend_przedmiotu(oceny),
+            "ma_nowe": any(g.get("jest_nowa") for g in oceny),
+        })
+    return wynik
+
+
+def _ostatnie_oceny(wg_przedmiotu: Dict[str, List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """Wszystkie oceny jako plaska lista, od najnowszej."""
+    plaska = []
+    for przedmiot, oceny in wg_przedmiotu.items():
+        for g in oceny:
+            d = _parse_date(g.get("data"))
+            plaska.append({
+                "przedmiot": przedmiot,
+                "ocena": g.get("ocena", ""),
+                "ikona": _ikona_oceny(g.get("ocena")),
+                "kategoria": g.get("kategoria", ""),
+                "waga": g.get("waga"),
+                "liczy_sie": g.get("liczy_sie", True),
+                "data": g.get("data", ""),
+                "data_iso": d.isoformat() if d else "",
+                "komentarz": g.get("komentarz", ""),
+                "nauczyciel": g.get("nauczyciel", ""),
+                "jest_nowa": bool(g.get("jest_nowa")),
+                "opisowa": _wartosc_oceny(g.get("ocena", "")) is None,
+            })
+    return sorted(plaska, key=lambda o: o["data_iso"], reverse=True)
+
+
 def _zadania_wg_dni(
     zadania: List[Dict[str, Any]], szczegoly: Dict[str, Dict[str, str]], dzis: date
 ) -> List[Dict[str, Any]]:
@@ -679,6 +751,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._ogl_przesuniecie = 0
         self._term_przesuniecie = 0
         self._zad_przesuniecie = 0
+        self._oceny_przesuniecie = 0
         self._plan_tydzien = 0  # przesuniecie widoku planu w tygodniach (0 = biezacy tydzien szkolny)
         self._plan_dodatkowy: Dict[str, List[Dict[str, Any]]] = {}  # dni spoza danych bazowych
         self._tresci_store: Optional[Store] = (
@@ -799,6 +872,39 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             for iso in dni:
                 self._plan_dodatkowy[iso] = plan.get(iso, [])  # pusta lista = pobrane, brak lekcji
         self._plan_tydzien = nowe
+        self.async_update_listeners()
+        return True
+
+    def widok_ocen(self) -> Dict[str, Any]:
+        """Ekran "Ostatnie oceny": OCEN_NA_EKRANIE ocen od najnowszych (pozycje od 1)."""
+        lista = _ostatnie_oceny((self.data or {}).get("oceny_wg_przedmiotu") or {})
+        przes = min(self._oceny_przesuniecie, max(0, len(lista) - 1))
+        czesc = lista[przes : przes + OCEN_NA_EKRANIE]
+        return {
+            "od": przes + 1 if czesc else 0,
+            "do": przes + len(czesc),
+            "razem": len(lista),
+            "najnowsze": przes == 0,
+            "oceny": czesc,
+        }
+
+    def async_przegladaj_oceny(self, kierunek: str) -> bool:
+        """Przesun ekran ocen ("nastepna" = starsze, "poprzednia" = nowsze, "najnowsze"); bez zapytan."""
+        lista = _ostatnie_oceny((self.data or {}).get("oceny_wg_przedmiotu") or {})
+        przes = min(self._oceny_przesuniecie, max(0, len(lista) - 1))
+        if kierunek == "najnowsze":
+            nowe = 0
+        elif kierunek == "nastepna":
+            nowe = przes + OCEN_NA_EKRANIE
+            if nowe >= len(lista):
+                return False
+        elif kierunek == "poprzednia":
+            if przes == 0:
+                return False
+            nowe = max(0, przes - OCEN_NA_EKRANIE)
+        else:
+            return False
+        self._oceny_przesuniecie = nowe
         self.async_update_listeners()
         return True
 

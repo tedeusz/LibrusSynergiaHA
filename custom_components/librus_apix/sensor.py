@@ -42,6 +42,7 @@ from .coordinator import (
     _suma_wag,
     _tematy_wg_dni,
     _terminarz_wg_dni,
+    _oceny_wg_przedmiotow,
     _zadania_wg_przedmiotow,
     _tresc_zadania,
     _wpis_kompakt,
@@ -154,6 +155,8 @@ class LibrusSzczesliwyNumerekSensor(CoordinatorEntity, SensorEntity):
 class LibrusOcenySensor(CoordinatorEntity, SensorEntity):
     """Czujnik z wszystkimi ocenami pogrupowanymi wedlug przedmiotow."""
 
+    _unrecorded_attributes = frozenset({"przedmioty", "przegladanie", "oceny_wg_przedmiotu"})
+
     def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
         """Inicjalizacja."""
         super().__init__(coordinator)
@@ -180,7 +183,25 @@ class LibrusOcenySensor(CoordinatorEntity, SensorEntity):
             for grades in oceny_wg_przedmiotu.values()
             for g in grades
         )
+        wszystkie = [g for oceny in oceny_wg_przedmiotu.values() for g in oceny]
+        przedmioty = _oceny_wg_przedmiotow(
+            oceny_wg_przedmiotu, data.get("srednie_librus", {}), data.get("semestr_biezacy")
+        )
+        ze_srednia = [p for p in przedmioty if p["srednia"] is not None]
         return {
+            # Zestawienie wg przedmiotow: plakietki ocen, srednia wazona, srednia Librusa, trend
+            "przedmioty": przedmioty,
+            # Ekran listy "Ostatnie oceny" (usluga librus_apix.przegladaj_oceny)
+            "przegladanie": self.coordinator.widok_ocen(),
+            "podsumowanie": {
+                "srednia_wazona": _srednia_wazona(wszystkie),
+                "srednia_ze_srednich": (
+                    round(sum(p["srednia"] for p in ze_srednia) / len(ze_srednia), 2) if ze_srednia else None
+                ),
+                "liczba_nowych": sum(1 for g in wszystkie if g.get("jest_nowa")),
+                "najlepszy": max(ze_srednia, key=lambda p: p["srednia"])["przedmiot"] if ze_srednia else None,
+                "najslabszy": min(ze_srednia, key=lambda p: p["srednia"])["przedmiot"] if ze_srednia else None,
+            },
             "oceny_wg_przedmiotu": oceny_wg_przedmiotu,
             "liczba_ocen": len((self.coordinator.data or {}).get("oceny", [])),
             "liczba_przedmiotow": len(oceny_wg_przedmiotu),
