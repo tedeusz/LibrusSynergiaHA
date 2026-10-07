@@ -2,31 +2,87 @@
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/LukMaverick)
 
-Integracja Home Assistant z systemem Librus Synergia, umożliwiająca monitorowanie ocen, wiadomości i innych danych szkolnych.
+Integracja Home Assistant z systemem Librus Synergia: oceny (także opisowe), wiadomości, plan lekcji, zadania domowe, terminarz, frekwencja, ogłoszenia i powiadomienia.
+
+> **Fork.** To rozszerzona wersja projektu [LukMaverick/LibrusSynergiaHA](https://github.com/LukMaverick/LibrusSynergiaHA) (v1.1.5), zbudowanego na bibliotece [librus-apix](https://github.com/RustySnek/librus-apix). Zmiany obejmują wyłącznie integrację (`custom_components/librus_apix`). Szczegóły w sekcji [Co dodaje ten fork](#-co-dodaje-ten-fork).
 
 ## ✨ Funkcje
 
-- 📊 **Monitoring ocen** - wszystkie oceny ze wszystkich przedmiotów
+- 📊 **Oceny** - wszystkie oceny bieżącego semestru, także **oceny opisowe [OO]** z klas I–III (np. „Uż”), średnie ważone i oficjalne średnie Librusa
 - 📈 **Statystyki** - średnie ocen, liczba ocen, trend
-- 📧 **Wiadomości** - najnowsze wiadomości z dziennika
-- 🔔 **Powiadomienia** - automatyczne powiadomienia o nowych ocenach/wiadomościach
-- 🏠 **Dashboard** - piękne karty w Home Assistant
+- 📧 **Wiadomości** - lista z treścią pobieraną na żądanie i stronicowaniem do starszych wiadomości
+- 🗓️ **Plan lekcji** - plan dnia i tygodnia z zastępstwami i odwołanymi lekcjami, aktualna lekcja, czasy początku i końca lekcji
+- 📝 **Zadania domowe, terminarz i sprawdziany** - pogrupowane po dniach, ze stronicowaniem
+- ✅ **Frekwencja** - procent, liczniki nieobecności, spóźnień i zwolnień oraz lista wpisów ze stronicowaniem
+- 📢 **Ogłoszenia szkoły** i 📖 **tematy lekcji**
+- 🔔 **Zdarzenia HA** - nowa ocena, wiadomość, zadanie, zdarzenie w terminarzu, ogłoszenie i wpis frekwencji
+- 📅 **Kalendarz** HA z terminarzem i zadaniami domowymi
 
-## 🚀 Sensory
+## 🚀 Sensory i encje
 
-Integracja tworzy następujące sensory:
+Nazwy encji zależą od nazwy ucznia, np. `sensor.librus_<imie_nazwisko>_oceny`. Dokładne nazwy znajdziesz w **Narzędzia deweloperskie → Stany**.
 
-| Sensor | Opis | Wartość |
-|--------|------|---------|
-| `sensor.librus_uczen` | Informacje o uczniu (klasa, wychowawca, szkoła) | imię i nazwisko |
-| `sensor.librus_szczesliwy_numerek` | Szczęśliwy numerek dnia | numer |
-| `sensor.librus_oceny` | Wszystkie oceny bieżącego semestru | liczba ocen |
-| `sensor.librus_srednia_ocen` | **Globalna średnia** ze wszystkich przedmiotów | float (wykres 📈) |
-| `sensor.librus_wiadomosci` | Ostatnie 5 wiadomości z pełną treścią | liczba nieprzeczytanych |
-| `sensor.librus_<przedmiot>` | Oceny z danego przedmiotu (np. `sensor.librus_matematyka`) | lista ocen: "4, 3+, 5" |
-| `sensor.librus_srednia_<przedmiot>` | **Średnia** z danego przedmiotu (np. `sensor.librus_srednia_matematyka`) | float (wykres 📈) |
+| Encja | Opis |
+|-------|------|
+| `sensor.librus_..._oceny` | Oceny bieżącego semestru (liczba ocen; atrybuty: przedmioty, ostatnie oceny, ekran przeglądania) |
+| `sensor.librus_..._srednia_ocen`, `..._srednia_<przedmiot>` | Średnie (`state_class: measurement`, wykres historii) |
+| `sensor.librus_..._<przedmiot>` | Oceny z danego przedmiotu |
+| `sensor.librus_..._wiadomosci` | Wiadomości (liczba nieprzeczytanych; atrybuty: lista, otwarta wiadomość, ekran przeglądania) |
+| `sensor.librus_..._plan_lekcji_dzis`, `..._plan_lekcji_nastepny_dzien`, `..._plan_lekcji_tydzien` | Plan lekcji na dziś, następny dzień nauki i tydzień (z przeglądaniem tygodni) |
+| `sensor.librus_..._aktualna_lekcja` | Trwająca lekcja i następna |
+| `sensor.librus_..._poczatek_lekcji_dzis`, `..._koniec_lekcji_dzis`, `..._poczatek_lekcji_nastepny_dzien` | Znaczniki czasu do wyzwalaczy w automatyzacjach |
+| `sensor.librus_..._zadania_domowe`, `..._zadania` | Zadania domowe (z treścią zadań z najbliższych dni) |
+| `sensor.librus_..._terminarz` | Terminarz i sprawdziany |
+| `sensor.librus_..._frekwencja` | Frekwencja w procentach (ogółem i dla semestrów) |
+| `sensor.librus_..._nieobecnosci` | Liczniki nieobecności, spóźnień i zwolnień oraz lista wpisów |
+| `sensor.librus_..._ogloszenia` | Ogłoszenia szkoły |
+| `sensor.librus_..._tematy_lekcji` | Tematy zrealizowanych lekcji z ostatnich dni |
+| `sensor.librus_..._szczesliwy_numerek`, `..._informacje_o_uczniu` | Szczęśliwy numerek i dane ucznia |
+| `binary_sensor.librus_..._lekcja_trwa`, `..._lekcje_dzis` | Czy trwa lekcja, czy dziś są lekcje |
+| `calendar.librus_..._terminarz_i_zadania` | Kalendarz z terminarzem i zadaniami domowymi |
 
 Sensory średnich mają `state_class: measurement` — HA automatycznie rysuje dla nich wykres historyczny po kliknięciu w encję.
+
+## 🆕 Co dodaje ten fork
+
+- **Oceny opisowe [OO]** (klasy I–III). Strona Librusa wypełnia je skryptem przez API, więc biblioteka ich nie widzi. Integracja pobiera je z API Synergii i pokazuje jako ocenę „OO” z obszarem, wymaganiami, opisem i nauczycielem. Jeśli API chwilowo nie odpowie, zostają ostatnie znane oceny (w logu pojawia się ostrzeżenie z kodami odpowiedzi).
+- **Własny parser strony ocen** uzupełniający wyniki biblioteki, gdy ta pominie część ocen.
+- **Warstwowe odświeżanie** zamiast jednego rzadkiego cyklu (patrz niżej).
+- **Nowe sensory, kalendarz i sensory binarne**: plan lekcji, zadania domowe, frekwencja, ogłoszenia, tematy lekcji, aktualna lekcja.
+- **Przeglądanie list usługami** (bez dodatkowych zapytań do Librusa) do budowy dashboardów ze stronicowaniem.
+- **Treść wiadomości na żądanie**, zapamiętywana w `Store`, bez oznaczania starych wiadomości jako przeczytanych.
+- **Zdarzenia HA** dla nowych ocen, wiadomości, zadań, terminarza, ogłoszeń i wpisów frekwencji.
+- **Usługa diagnostyczna** `librus_apix.diagnostyka_ocen`.
+
+### Odświeżanie danych
+
+| Co | Jak często |
+|----|-----------|
+| Wiadomości (szybkie sprawdzanie nowych) | co 3 minuty |
+| Oceny, zadania, terminarz, frekwencja, ogłoszenia + zdarzenia | co 15 minut |
+| Pełne odświeżenie wszystkiego (m.in. plan, tematy lekcji, średnie Librusa) | co 2 godziny |
+
+Wartości można zmienić w stałych na początku `coordinator.py` (`WIADOMOSCI_INTERWAL`, `ZDARZENIA_INTERWAL`, `PLAN_INTERWAL`) oraz `SCAN_INTERVAL` w `const.py`.
+
+## 🧰 Usługi
+
+Usługi przesuwają ekran listy (atrybut `przegladanie` odpowiedniego sensora) i nie wysyłają zapytań do Librusa. Parametr `kierunek`: `nastepna` (starsze), `poprzednia` (nowsze) lub `najnowsze`.
+
+| Usługa | Opis |
+|--------|------|
+| `librus_apix.przegladaj` | Lista wiadomości (przechodzi też do starszych stron Librusa) |
+| `librus_apix.pobierz_tresc` | Pobiera i zapisuje treść wiadomości z podanej pozycji listy (`indeks`) |
+| `librus_apix.przegladaj_ogloszenia` | Lista ogłoszeń |
+| `librus_apix.przegladaj_terminarz` | Kolejne dni ze zdarzeniami w terminarzu |
+| `librus_apix.przegladaj_zadania` | Kolejne dni z zadaniami domowymi |
+| `librus_apix.przegladaj_oceny` | Lista ostatnich ocen |
+| `librus_apix.przegladaj_frekwencje` | Lista nieobecności, spóźnień i zwolnień |
+| `librus_apix.przegladaj_plan` | Tydzień planu lekcji: `kierunek` = `poprzedni`, `biezacy`, `nastepny` |
+| `librus_apix.diagnostyka_ocen` | Zapisuje raport diagnostyczny ocen w katalogu konfiguracji HA |
+
+### Diagnostyka ocen
+
+Jeśli brakuje ocen, uruchom `librus_apix.diagnostyka_ocen` (Narzędzia deweloperskie → Usługi). Zapisze w katalogu konfiguracji plik `librus_apix_diagnostyka_ocen.txt` (oraz `librus_apix_strona_ocen.html`). Przed wysłaniem raportu komukolwiek **usuń z niego dane osobowe** (imię i nazwisko ucznia, nauczycieli, identyfikatory).
 
 ## 📦 Instalacja
 
@@ -34,14 +90,14 @@ Sensory średnich mają `state_class: measurement` — HA automatycznie rysuje d
 
 Kliknij poniższy przycisk, aby automatycznie dodać repozytorium do HACS z właściwą kategorią:
 
-[![Otwórz w HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=LukMaverick&repository=LibrusSynergiaHA&category=integration)
+[![Otwórz w HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tedeusz&repository=LibrusSynergiaHA&category=integration)
 
 Lub ręcznie:
 
 1. Otwórz HACS w Home Assistant
 2. Kliknij trzy kropki (⋮) w prawym górnym rogu
 3. Wybierz **"Custom repositories"**
-4. W polu URL wpisz dokładnie: `https://github.com/LukMaverick/LibrusSynergiaHA`  
+4. W polu URL wpisz dokładnie: `https://github.com/tedeusz/LibrusSynergiaHA`  
    ⚠️ **Bez `.git` na końcu!**
 5. W polu **Category** wybierz: **`Integration`**  
    ⚠️ **NIE wybieraj "AppDaemon", "Plugin" ani żadnej innej opcji!**
@@ -229,19 +285,37 @@ severity:
   red: 0
 ```
 
+## 🖼️ Gotowe dashboardy i automatyzacje (przykłady)
+
+W katalogu [`examples/`](examples) są gotowe pulpity i automatyzacje używające opisanych wyżej sensorów i usług. Wszystkie nazwy encji są ogólne, więc przed użyciem **zamień** `librus_imie_nazwisko` na nazwę swojej encji (Narzędzia deweloperskie → Stany), a w powiadomieniach `notify.mobile_app_TWOJ_TELEFON` na swoją usługę powiadomień.
+
+| Plik | Zawartość |
+|------|-----------|
+| `examples/dashboards/librus_widok_glowny.yaml` | Widok główny z kafelkami przechodzącymi do pozostałych pulpitów |
+| `examples/dashboards/oceny_dashboard.yaml` | Oceny wg przedmiotów i lista ostatnich ocen ze stronicowaniem |
+| `examples/dashboards/plan_lekcji_dashboard.yaml` | Plan tygodnia ze stronicowaniem, aktualna lekcja i tematy lekcji |
+| `examples/dashboards/zadania_dashboard.yaml` | Zadania domowe po dniach ze stronicowaniem |
+| `examples/dashboards/terminarz_dashboard.yaml`, `sprawdziany_dashboard.yaml` | Terminarz i sprawdziany ze stronicowaniem |
+| `examples/dashboards/wiadomosci_dashboard.yaml` | Wiadomości ze stronicowaniem i podglądem treści |
+| `examples/dashboards/librus_szkola_dashboard.yaml` | Ogłoszenia szkoły ze stronicowaniem |
+| `examples/dashboards/frekwencja_dashboard.yaml` | Frekwencja, liczniki i lista wpisów ze stronicowaniem |
+| `examples/automations/librus_automatyzacje.yaml` | Powiadomienia: nowe zadanie, nieobecność, ocena, ogłoszenie, wiadomość, koniec lekcji, przypomnienie o terminach |
+
+Przyciski przeglądania w pulpitach używają kart [Mushroom](https://github.com/piitaya/lovelace-mushroom) (instalacja przez HACS). Wklejanie pulpitu: Ustawienia → Pulpity → (pulpit) → Edytuj → ⋮ → Edytor YAML.
+
 ## 🔔 Automatyzacje powiadomień na telefon
 
 Integracja wysyła zdarzenia Home Assistant gdy pojawi się nowa wiadomość lub ocena.
-Zdarzenia są wykrywane przy każdym odświeżeniu (co 2h). Pierwsze uruchomienie tylko zapamiętuje stan — **nie wysyła duplikatów**.
+Zdarzenia są wykrywane przy kolejnych odświeżeniach (wiadomości co 3 minuty, pozostałe co 15 minut). Pierwsze odświeżenie po starcie HA tylko zapamiętuje stan — **nie wysyła duplikatów**. Oznacza to także, że elementy, które pojawiły się w czasie restartu HA, nie wywołają powiadomienia.
 
 > **Test bez czekania:** Idź do **Developer Tools → Events**, Event type: `librus_apix_nowa_wiadomosc`, Event data jak poniżej i kliknij **Fire Event**.
 
 ### 📬 Powiadomienie o nowej wiadomości
 
 Zdarzenie: `librus_apix_nowa_wiadomosc`  
-Dostępne dane: `nadawca`, `temat`, `data`, `ma_zalacznik`
+Dostępne dane: `nadawca`, `temat`, `data`, `ma_zalacznik`, `nieprzeczytana`, `tresc`, `indeks`
 
-> **Uwaga:** Treść wiadomości nie jest pobierana celowo — aby nie oznaczać wiadomości jako przeczytanych w Librusie.
+> **Uwaga:** Treść nowej wiadomości jest dociągana tylko wtedy, gdy jest potrzebna, a wcześniejsze wiadomości nie są przez to oznaczane jako przeczytane. Zdarzenie może przyjść bez treści (`tresc` puste).
 
 ```yaml
 automation:
@@ -265,7 +339,7 @@ automation:
 ### 📝 Powiadomienie o nowej ocenie
 
 Zdarzenie: `librus_apix_nowa_ocena`  
-Dostępne dane: `przedmiot`, `ocena`, `data`, `kategoria`, `nauczyciel`
+Dostępne dane: `przedmiot`, `ocena`, `data`, `kategoria`, `nauczyciel`, `waga`, `liczy_sie`, `komentarz`. Dla ocen opisowych `ocena` to „OO”, a `komentarz` zawiera treść opisu.
 
 ```yaml
 automation:
@@ -285,6 +359,15 @@ automation:
 ```
 
 > **Gdzie znaleźć nazwę telefonu?** HA → Settings → Devices & Services → Mobile App → nazwa urządzenia (np. `notify.mobile_app_samsung_galaxy_s24`)
+
+### Pozostałe zdarzenia
+
+| Zdarzenie | Dane |
+|-----------|------|
+| `librus_apix_nowe_zadanie` | `przedmiot`, `kategoria`, `termin`, `nauczyciel` |
+| `librus_apix_nowe_zdarzenie` | `data`, `tytul`, `przedmiot`, `godzina` |
+| `librus_apix_nowe_ogloszenie` | `tytul`, `autor`, `data`, `tresc` |
+| `librus_apix_nowa_nieobecnosc` | `data`, `symbol`, `typ`, `przedmiot`, `godzina_lekcyjna`, `nauczyciel` |
 
 ## 🛠️ Rozwój
 
@@ -344,7 +427,7 @@ MIT License - patrz [LICENSE](LICENSE)
 
 ## 🤝 Wkład
 
-Pull requesty są mile widziane! Sprawdź [CONTRIBUTING.md](CONTRIBUTING.md)
+Pull requesty i zgłoszenia są mile widziane. Pamiętaj, żeby w opisach i logach nie umieszczać danych osobowych.
 
 ### 🙏 Podziękowania
 
@@ -352,7 +435,7 @@ Specjalne podziękowania dla **KB** za wsparcie i pomoc w rozwoju projektu.
 
 ## 👨‍💻 Autor
 
-Stworzono na bazie biblioteki [librus-apix](https://github.com/RustySnek/librus-apix)
+Projekt oryginalny: [LukMaverick/LibrusSynergiaHA](https://github.com/LukMaverick/LibrusSynergiaHA), zbudowany na bibliotece [librus-apix](https://github.com/RustySnek/librus-apix). Ten fork rozwija integrację o funkcje opisane wyżej.
 
 ---
 
