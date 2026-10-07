@@ -147,10 +147,13 @@ def _liczba(value: Any) -> Optional[float]:
 
 
 def _komentarz_oceny(desc: str) -> str:
-    """Wyciagnij pole "Komentarz" z opisu oceny (biblioteka sklada caly tooltip w `desc`)."""
-    for linia in (desc or "").splitlines():
-        if linia.strip().lower().startswith("komentarz"):
-            return linia.split(":", 1)[1].strip() if ":" in linia else ""
+    """Komentarz do oceny z opisu (biblioteka sklada caly tooltip w `desc`); dla ocen opisowych - pole "Opis"."""
+    for pole in ("komentarz", "opis"):
+        for linia in (desc or "").splitlines():
+            if linia.strip().lower().startswith(pole) and ":" in linia:
+                tresc = linia.split(":", 1)[1].strip()
+                if tresc:
+                    return tresc
     return ""
 
 

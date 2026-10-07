@@ -1,7 +1,9 @@
 """The Librus APIX integration."""
 
 import asyncio
+import inspect
 import logging
+import re
 import traceback
 from datetime import date
 from typing import Dict, Any
@@ -19,9 +21,223 @@ from librus_apix.exceptions import TokenError
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, SCAN_INTERVAL
-from .coordinator import LibrusDataUpdateCoordinator, UWZGLEDNIJ_OCENY_OPISOWE, _biezacy_semestr
+from .coordinator import (
+    LibrusDataUpdateCoordinator,
+    UWZGLEDNIJ_OCENY_OPISOWE,
+    _biezacy_semestr,
+    _parse_date,
+    _wartosc_oceny,
+)
 
 _LOGGER = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Wlasny, tolerancyjny parser strony z ocenami (uzupelnia biblioteke librus-apix)
+# ---------------------------------------------------------------------------
+
+_BR = re.compile(r"<br\s*/?>", re.IGNORECASE)
+
+
+def _pola_z_tytulu(title: str) -> tuple:
+    """Rozbij opis oceny ("Klucz: wartosc<br />...") na slownik pol i liste linii (linie bez klucza dolaczamy do poprzedniej)."""
+    linie, pola, ostatni = [], {}, None
+    for surowa in _BR.split(title or ""):
+        linia = " ".join(surowa.split())
+        if not linia:
+            continue
+        klucz, dwukropek, wartosc = linia.partition(":")
+        if dwukropek and 0 < len(klucz) <= 40:
+            ostatni = klucz.strip()
+            pola[ostatni] = wartosc.strip()
+            linie.append(f"{ostatni}: {pola[ostatni]}")
+        elif ostatni is not None:  # ciag dalszy poprzedniego pola (np. wieloliniowy opis)
+            pola[ostatni] = f"{pola[ostatni]} {linia}".strip()
+            linie[-1] = f"{ostatni}: {pola[ostatni]}"
+        else:
+            linie.append(linia)
+    return pola, linie
+
+
+def _oceny_z_html(html: str, semestr: int) -> list:
+    """Wszystkie oceny ze strony "Oceny" (kazdy element grade-box z opisem), tylko z podanego semestru.
+
+    Semestr ustalamy z daty oceny (wrzesien-styczen = 1, luty-czerwiec = 2), a nie z kolumny tabeli,
+    bo uklad kolumn rozni sie miedzy klasami (np. 1-3 maja inne kolumny niz starsze).
+    """
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html or "", "lxml")
+    wynik, widziane = [], set()
+    for a in soup.select("span.grade-box a, a.ocena"):
+        title = a.attrs.get("title", "")
+        if "Data:" not in title:
+            continue
+        ocena = " ".join(a.get_text().replace("\xa0", " ").split())
+        if not ocena:
+            continue
+        pola, linie = _pola_z_tytulu(title)
+        data = (pola.get("Data", "").split(" ")[0] or "")[:10]
+        d = _parse_date(data)
+        if d is not None and _biezacy_semestr(d) != semestr:
+            continue
+        wiersz = next(
+            (tr for tr in a.find_parents("tr") if {"line0", "line1"} & set(tr.get("class", [])) and not tr.get("id")),
+            a.find_parent("tr"),
+        )
+        przedmiot = ""
+        if wiersz is not None:
+            komorka = next((td for td in wiersz.find_all("td") if "micro" not in td.get("class", [])), None)
+            przedmiot = " ".join(komorka.get_text().split()) if komorka is not None else ""
+        przedmiot = przedmiot or "Inne"
+        href = a.attrs.get("href", "")
+        if "javascript" in href:
+            href = ""
+        waga = pola.get("Waga", "")
+        klucz = (href, przedmiot, ocena, data, pola.get("Kategoria", ""))
+        if klucz in widziane:
+            continue
+        widziane.add(klucz)
+        liczy = "Licz do średniej" in pola
+        wynik.append({
+            "subject": przedmiot,
+            "grade": ocena,
+            "date": data,
+            "category": pola.get("Kategoria") or pola.get("Obszar", ""),
+            "teacher": pola.get("Nauczyciel", ""),
+            "semester": semestr,
+            "type": "descriptive" if _wartosc_oceny(ocena) is None else "numeric",
+            "weight": int(waga) if waga.isdigit() else None,
+            "counts": pola.get("Licz do średniej", "").strip().lower() == "tak" if liczy else True,
+            "href": href,
+            "desc": f"Ocena: {ocena}\nPrzedmiot: {przedmiot}\n" + "\n".join(linie),
+        })
+    return wynik
+
+
+def _tylko_nowe_oceny(znane: list, kandydaci: list) -> list:
+    """Oceny z kandydatow, ktorych nie ma jeszcze wsrod znanych (wg linku albo przedmiot+ocena+data)."""
+    hrefy = {g["href"] for g in znane if g.get("href")}
+    trojki = {(g["subject"], g["grade"], g["date"]) for g in znane}
+    wynik = []
+    for g in kandydaci:
+        if (g.get("href") and g["href"] in hrefy) or (g["subject"], g["grade"], g["date"]) in trojki:
+            continue
+        wynik.append(g)
+    return wynik
+
+
+def _to_strona_portalu(html: str) -> bool:
+    """Czy to publiczna strona Portalu Librus (niezalogowany) zamiast strony Synergii."""
+    h = html or ""
+    return "Portal LIBRUS Rodzina" in h or ("niezalogowany" in h and "portal.librus.pl" in h)
+
+
+def _pobierz_strone_ocen(client) -> tuple:
+    """Pobiera strone ocen: POST (jak biblioteka), a gdy to portal - GET. Zwraca (html, opis)."""
+    opis = []
+    html = ""
+    for metoda in ("post", "get"):
+        try:
+            if metoda == "post":
+                resp = client.post(client.GRADES_URL, data={"zmiany_logowanie_wszystkie": "1"})
+            else:
+                resp = client.get(client.GRADES_URL)
+            html = resp.text
+            opis.append(f"{metoda.upper()} {client.GRADES_URL} -> {resp.status_code} {resp.url} "
+                        f"(przekierowan: {len(resp.history)}, portal: {_to_strona_portalu(html)})")
+            if not _to_strona_portalu(html):
+                break
+        except Exception as ex:  # noqa: BLE001
+            opis.append(f"{metoda.upper()} blad: {ex}")
+    return html, " | ".join(opis)
+
+
+def _diagnostyka_ocen(html: str, wynik: Any, semestr: int, info: str = "") -> str:
+    """Czytelny raport do wklejenia w razie problemow z ocenami (bez hasel i tokenow)."""
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html or "", "lxml")
+    wiersze = soup.find_all("tr", attrs={"class": ["line0", "line1"], "id": None})
+    pudelka = soup.select("span.grade-box")
+    linie = [
+        f"Semestr biezacy: {semestr}",
+        f"Dlugosc strony ocen: {len(html or '')} znakow",
+        f"Wierszy tabeli (line0/line1 bez id): {len(wiersze)}",
+        f"Elementow grade-box: {len(pudelka)}",
+        f"Pobranie: {info}",
+        f"Strona to portal (niezalogowany): {_to_strona_portalu(html)}",
+        f"Ocen w wyniku integracji: {len((wynik or {}).get('oceny', []))}",
+    ]
+    for g in (wynik or {}).get("oceny", [])[:30]:
+        linie.append(f"  - {g['subject']} | {g['grade']} | {g['date']} | {g['type']} | {g.get('category', '')}")
+    linie.append("")
+    linie.append("Pierwsze elementy grade-box (surowy HTML):")
+    for el in pudelka[:6]:
+        linie.append(str(el)[:1500])
+        wiersz = next((tr for tr in el.find_parents("tr")), None)
+        if wiersz is not None:
+            linie.append("  klasy wiersza: %s, liczba komorek: %d" % (wiersz.get("class"), len(wiersz.find_all("td"))))
+    linie.append("")
+    linie.append("Wiersze tabeli (tekst komorek, bez pustych):")
+    for i, tr in enumerate(wiersze[:40]):
+        komorki = [" ".join(td.get_text(" ", strip=True).split()) for td in tr.find_all("td")]
+        linie.append(f"  [{i}] " + " | ".join(k[:60] for k in komorki if k))
+    linie.append("")
+    linie.append("Komorki z tytulem/tooltipem (title) - mozliwe oceny opisowe:")
+    n = 0
+    for el in soup.select("[title]"):
+        t = (el.get("title") or "").strip()
+        if t and ("Ocena" in t or "Kategoria" in t or "Data" in t):
+            linie.append("  " + el.get_text(" ", strip=True)[:30] + " :: " + t.replace("<br>", " / ").replace("<br/>", " / ")[:300])
+            n += 1
+            if n >= 15:
+                break
+    linie.append("")
+    linie.append("Surowy HTML sekcji 'Biezace oceny opisowe' (pierwsze 5000 znakow):")
+    for h in soup.find_all(["h2", "h3"]):
+        if "opisowe" in h.get_text().lower():
+            tabela = h.find_next("table")
+            linie.append(str(tabela)[:5000] if tabela is not None else "(brak tabeli po naglowku)")
+            break
+    else:
+        linie.append("(nie znaleziono naglowka)")
+    linie.append("")
+    linie.append("Surowy HTML pierwszego wiersza przedmiotu opisowego (wraz z sasiednimi, takze z id):")
+    for tr in soup.select("tr.studentRow"):
+        if tr is not None:
+            linie.append(str(tr)[:3000])
+            for sib in tr.find_next_siblings("tr", limit=2):
+                linie.append(str(sib)[:3000])
+            break
+    linie.append("")
+    linie.append("Skrypty strony powiazane z ocenami opisowymi (showHideOO / gradesCell / ajax):")
+    n_sk = 0
+    for sc in soup.find_all("script"):
+        tekst = sc.string or sc.get_text() or ""
+        if any(k in tekst for k in ("showHideOO", "gradesCell", "studentGradesDetails", "oceny_opisowe", "OO")):
+            linie.append("--- <script> (" + str(len(tekst)) + " znakow) ---")
+            for k in ("showHideOO", "gradesCell", "studentGradesDetails", "ajax", "url"):
+                for m in re.finditer(re.escape(k), tekst):
+                    linie.append("  ..." + " ".join(tekst[max(0, m.start() - 150):m.end() + 350].split()))
+                    break
+            n_sk += 1
+            if n_sk >= 6:
+                break
+    if not n_sk:
+        linie.append("(brak)")
+    linie.append("")
+    linie.append("Naglowki i linki zwiazane z ocenami:")
+    for h in soup.select("h1, h2, h3, thead th")[:25]:
+        linie.append("  H: " + " ".join(h.get_text(" ", strip=True).split())[:100])
+    widziane = set()
+    for a in soup.find_all("a", href=True):
+        if "ocen" in a["href"].lower() and a["href"] not in widziane:
+            widziane.add(a["href"])
+            linie.append("  A: " + a["href"] + " :: " + a.get_text(" ", strip=True)[:50])
+            if len(widziane) >= 25:
+                break
+    return "\n".join(linie)
 
 
 def _current_semester() -> int:
@@ -67,6 +283,7 @@ class LibrusApiClient:
         self._client: Client = None
         self._token = None
         self._auth_lock = asyncio.Lock()
+        self._ostatnia_strona_ocen = ""
 
     def _reset_auth(self) -> None:
         """Reset authentication state to force re-authentication on next call."""
@@ -90,75 +307,102 @@ class LibrusApiClient:
                 return False
 
     async def async_get_grades(self):
-        """Get grades from Librus: {"oceny": [...], "srednie_librus": {...}} albo None."""
+        """Get grades from Librus: {"oceny": [...], "srednie_librus": {...}} albo None.
+
+        Oceny czytamy dwiema drogami: biblioteka librus-apix (oceny liczbowe, opisowe i srednie)
+        oraz wlasnym, tolerancyjnym parserem tej samej strony (patrz _oceny_z_html) - dzieki temu
+        ocena, ktorej biblioteka nie rozpozna (np. opisowa "Uz" w klasach 1-3) albo ktora wywroci
+        jej parser, nie znika z listy. Wyniki sa laczone bez duplikatow.
+        """
+        current_sem = _current_semester()
+        _LOGGER.debug("Filtrowanie ocen dla semestru %d", current_sem)
+
+        def _fetch(client):
+            from librus_apix.grades import get_grades
+            from librus_apix.helpers import no_access_check
+            from bs4 import BeautifulSoup
+
+            wynik_biblioteki, blad = None, None
+            try:
+                wynik_biblioteki = get_grades(client, "all")
+            except TokenError:
+                raise
+            except Exception as ex:  # parser biblioteki nie radzi sobie z ta strona - zostaje nasz
+                blad = ex
+                _LOGGER.warning("Biblioteka librus-apix nie odczytala ocen (%s) - uzywam wlasnego parsera", ex)
+            html, info = _pobierz_strone_ocen(client)
+            self._info_pobrania_ocen = info
+            if _to_strona_portalu(html):
+                _LOGGER.warning("Strona ocen to publiczny portal Librus (sesja nieaktywna): %s", info)
+                raise TokenError("Grades page returned the logged-out portal page")
+            no_access_check(BeautifulSoup(html, "lxml"))  # TokenError, gdy sesja wygasla
+            return wynik_biblioteki, html, blad
+
         for attempt in range(2):
             try:
                 if not self._client or not self._token:
                     if not await self.async_authenticate():
                         return None
-                client = self._client
-
-                from librus_apix.grades import get_grades
-
                 loop = asyncio.get_running_loop()
-                numeric_grades, average_grades, descriptive_grades = await loop.run_in_executor(
-                    None, get_grades, client, "all"
-                )
+                wynik_biblioteki, html, blad = await loop.run_in_executor(None, _fetch, self._client)
+                self._ostatnia_strona_ocen = html  # do diagnostyki
 
-                current_sem = _current_semester()
-                _LOGGER.debug("Filtrowanie ocen dla semestru %d", current_sem)
-
-                # Process all grades
-                all_grades = []
-
-                # Process numeric grades (only current semester)
-                for subject_grades in numeric_grades:
-                    for subject, grades_list in subject_grades.items():
-                        for grade in grades_list:
-                            if grade.semester != current_sem:
-                                continue
-                            all_grades.append({
-                                'subject': subject,
-                                'grade': grade.grade,
-                                'date': grade.date,
-                                'category': grade.category,
-                                'teacher': getattr(grade, 'teacher', ''),
-                                'semester': grade.semester,
-                                'type': 'numeric',
-                                'weight': grade.weight,
-                                'counts': grade.counts,
-                                'href': grade.href,
-                                'desc': grade.desc,
-                            })
-
-                # Process descriptive grades (only current semester, many are actually numeric)
-                for subject_grades in descriptive_grades:
-                    for subject, grades_list in subject_grades.items():
-                        for desc_grade in grades_list:
-                            if desc_grade.semester != current_sem:
-                                continue
-                            grade_val = desc_grade.grade.strip()
-                            if grade_val and (UWZGLEDNIJ_OCENY_OPISOWE or
-                                            grade_val.replace('+', '').replace('-', '').isdigit() or
-                                            grade_val in ['1', '2', '3', '4', '5', '6', '1+', '1-', '2+', '2-',
-                                                         '3+', '3-', '4+', '4-', '5+', '5-', '6+', '6-']):
+                all_grades: list = []
+                srednie_librus: dict = {}
+                if wynik_biblioteki is not None:
+                    numeric_grades, average_grades, descriptive_grades = wynik_biblioteki
+                    for subject_grades in numeric_grades:
+                        for subject, grades_list in subject_grades.items():
+                            for grade in grades_list:
+                                if grade.semester != current_sem:
+                                    continue
                                 all_grades.append({
                                     'subject': subject,
-                                    'grade': desc_grade.grade,
-                                    'date': desc_grade.date,
-                                    'category': getattr(desc_grade, 'desc', '').split('\n')[0] if hasattr(desc_grade, 'desc') else '',
-                                    'teacher': getattr(desc_grade, 'teacher', ''),
-                                    'semester': desc_grade.semester,
-                                    'type': 'descriptive',
-                                    'href': getattr(desc_grade, 'href', ''),
-                                    'desc': getattr(desc_grade, 'desc', ''),
+                                    'grade': grade.grade,
+                                    'date': grade.date,
+                                    'category': grade.category,
+                                    'teacher': getattr(grade, 'teacher', ''),
+                                    'semester': grade.semester,
+                                    'type': 'numeric',
+                                    'weight': grade.weight,
+                                    'counts': grade.counts,
+                                    'href': grade.href,
+                                    'desc': grade.desc,
                                 })
+                    for subject_grades in descriptive_grades:
+                        for subject, grades_list in subject_grades.items():
+                            for desc_grade in grades_list:
+                                if desc_grade.semester != current_sem:
+                                    continue
+                                grade_val = desc_grade.grade.strip()
+                                if grade_val and (UWZGLEDNIJ_OCENY_OPISOWE or
+                                                grade_val.replace('+', '').replace('-', '').isdigit() or
+                                                grade_val in ['1', '2', '3', '4', '5', '6', '1+', '1-', '2+', '2-',
+                                                             '3+', '3-', '4+', '4-', '5+', '5-', '6+', '6-']):
+                                    all_grades.append({
+                                        'subject': subject,
+                                        'grade': desc_grade.grade,
+                                        'date': desc_grade.date,
+                                        'category': getattr(desc_grade, 'desc', '').split('\n')[0] if hasattr(desc_grade, 'desc') else '',
+                                        'teacher': getattr(desc_grade, 'teacher', ''),
+                                        'semester': desc_grade.semester,
+                                        'type': 'descriptive',
+                                        'href': getattr(desc_grade, 'href', ''),
+                                        'desc': getattr(desc_grade, 'desc', ''),
+                                    })
+                    # Oficjalne srednie Librusa: {przedmiot: {semestr: gpa}}, semestr 0 = roczna
+                    srednie_librus = {
+                        subject: {g.semester: g.gpa for g in gpa_list}
+                        for subject, gpa_list in average_grades.items()
+                    }
 
-                # Oficjalne srednie Librusa: {przedmiot: {semestr: gpa}}, semestr 0 = roczna
-                srednie_librus = {
-                    subject: {g.semester: g.gpa for g in gpa_list}
-                    for subject, gpa_list in average_grades.items()
-                }
+                # Wlasny parser: dopisz to, czego biblioteka nie zwrocila
+                dodatkowe = _tylko_nowe_oceny(all_grades, _oceny_z_html(html, current_sem))
+                if dodatkowe:
+                    _LOGGER.info("Wlasny parser dopisal %d ocen pominietych przez biblioteke", len(dodatkowe))
+                    all_grades = all_grades + dodatkowe
+                if wynik_biblioteki is None and not all_grades and blad is not None:
+                    raise blad
 
                 return {"oceny": all_grades, "srednie_librus": srednie_librus}
 
@@ -179,6 +423,12 @@ class LibrusApiClient:
                 self._reset_auth()
                 if attempt == 1:
                     return None
+
+    async def async_diagnostyka_ocen(self) -> str:
+        """Tekst diagnostyczny: co widzi biblioteka, a co wlasny parser na stronie ocen."""
+        wynik = await self.async_get_grades()
+        html = getattr(self, "_ostatnia_strona_ocen", "") or ""
+        return _diagnostyka_ocen(html, wynik, _current_semester(), getattr(self, "_info_pobrania_ocen", ""))
 
     async def async_get_messages(self, count: int = 10, page: int = 0):
         """Pobierz najnowsze wiadomosci (nadawca, temat, data) - bez tresci, zeby nie oznaczac ich jako przeczytane.
@@ -478,159 +728,87 @@ async def async_setup(hass: HomeAssistant, config: Dict[str, Any]) -> bool:
     return True
 
 
+_KIERUNKI = ["nastepna", "poprzednia", "najnowsze"]
+# usluga -> (metoda koordynatora, nazwa glownego pola, dozwolone wartosci albo None = liczba 0-50)
+_USLUGI = {
+    "pobierz_tresc": ("async_pobierz_tresc", "indeks", None),
+    "przegladaj": ("async_przegladaj", "kierunek", _KIERUNKI),
+    "przegladaj_ogloszenia": ("async_przegladaj_ogloszenia", "kierunek", _KIERUNKI),
+    "przegladaj_terminarz": ("async_przegladaj_terminarz", "kierunek", _KIERUNKI),
+    "przegladaj_zadania": ("async_przegladaj_zadania", "kierunek", _KIERUNKI),
+    "przegladaj_oceny": ("async_przegladaj_oceny", "kierunek", _KIERUNKI),
+    "przegladaj_plan": ("async_przegladaj_plan", "kierunek", ["nastepny", "poprzedni", "biezacy"]),
+}
+
+
 def _zarejestruj_uslugi(hass: HomeAssistant) -> None:
-    """Usluga librus_apix.pobierz_tresc: pobiera i pokazuje tresc klikniętej wiadomosci."""
-    if hass.services.has_service(DOMAIN, "przegladaj"):
-        return
+    """Rejestruje uslugi integracji (kazda osobno, tylko jesli jeszcze nie istnieje)."""
 
-    async def _pobierz_tresc(call) -> None:
-        coordinators = hass.data.get(DOMAIN, {}).get("coordinators", {})
-        entry_id = call.data.get("config_entry_id")
-        coordinator = (
-            coordinators.get(entry_id) if entry_id else next(iter(coordinators.values()), None)
+    def _fabryka(metoda: str, pole: str):
+        async def _obsluga(call) -> None:
+            coordinators = hass.data.get(DOMAIN, {}).get("coordinators", {})
+            entry_id = call.data.get("config_entry_id")
+            coordinator = (
+                coordinators.get(entry_id) if entry_id else next(iter(coordinators.values()), None)
+            )
+            if coordinator is None:
+                _LOGGER.warning("%s: brak aktywnej integracji Librus", metoda)
+                return
+            wartosc = call.data[pole]
+            wynik = getattr(coordinator, metoda)(int(wartosc) if pole == "indeks" else wartosc)
+            if inspect.isawaitable(wynik):
+                await wynik
+
+        return _obsluga
+
+    if not hass.services.has_service(DOMAIN, "diagnostyka_ocen"):
+
+        async def _diagnostyka(call) -> None:
+            coordinators = hass.data.get(DOMAIN, {}).get("coordinators", {})
+            entry_id = call.data.get("config_entry_id")
+            coordinator = (
+                coordinators.get(entry_id) if entry_id else next(iter(coordinators.values()), None)
+            )
+            if coordinator is None:
+                return
+            raport = await coordinator.client.async_diagnostyka_ocen()
+            sciezka = hass.config.path("librus_apix_diagnostyka_ocen.txt")
+
+            strona = getattr(coordinator.client, "_ostatnia_strona_ocen", "") or ""
+            sciezka_html = hass.config.path("librus_apix_strona_ocen.html")
+
+            def _zapisz() -> None:
+                with open(sciezka, "w", encoding="utf-8") as plik:
+                    plik.write(raport)
+                with open(sciezka_html, "w", encoding="utf-8") as plik:
+                    plik.write(strona)
+
+            await hass.async_add_executor_job(_zapisz)
+            _LOGGER.warning("Raport diagnostyczny ocen zapisano w %s", sciezka)
+
+        hass.services.async_register(
+            DOMAIN, "diagnostyka_ocen", _diagnostyka, schema=vol.Schema({vol.Optional("config_entry_id"): str})
         )
-        if coordinator is None:
-            _LOGGER.warning("pobierz_tresc: brak aktywnej integracji Librus")
-            return
-        await coordinator.async_pobierz_tresc(int(call.data["indeks"]))
 
-    async def _przegladaj(call) -> None:
-        coordinators = hass.data.get(DOMAIN, {}).get("coordinators", {})
-        entry_id = call.data.get("config_entry_id")
-        coordinator = (
-            coordinators.get(entry_id) if entry_id else next(iter(coordinators.values()), None)
+    for nazwa, (metoda, pole, dozwolone) in _USLUGI.items():
+        if hass.services.has_service(DOMAIN, nazwa):
+            continue
+        walidator = (
+            vol.All(vol.Coerce(int), vol.Range(min=0, max=50)) if dozwolone is None else vol.In(dozwolone)
         )
-        if coordinator is not None:
-            await coordinator.async_przegladaj(call.data["kierunek"])
-
-    hass.services.async_register(
-        DOMAIN,
-        "przegladaj",
-        _przegladaj,
-        schema=vol.Schema(
-            {
-                vol.Required("kierunek"): vol.In(["nastepna", "poprzednia", "najnowsze"]),
-                vol.Optional("config_entry_id"): str,
-            }
-        ),
-    )
-
-    async def _przegladaj_ogloszenia(call) -> None:
-        coordinators = hass.data.get(DOMAIN, {}).get("coordinators", {})
-        entry_id = call.data.get("config_entry_id")
-        coordinator = (
-            coordinators.get(entry_id) if entry_id else next(iter(coordinators.values()), None)
+        hass.services.async_register(
+            DOMAIN,
+            nazwa,
+            _fabryka(metoda, pole),
+            schema=vol.Schema({vol.Required(pole): walidator, vol.Optional("config_entry_id"): str}),
         )
-        if coordinator is not None:
-            coordinator.async_przegladaj_ogloszenia(call.data["kierunek"])
+    _LOGGER.debug("Zarejestrowane uslugi: %s", ", ".join(_USLUGI))
 
-    hass.services.async_register(
-        DOMAIN,
-        "przegladaj_ogloszenia",
-        _przegladaj_ogloszenia,
-        schema=vol.Schema(
-            {
-                vol.Required("kierunek"): vol.In(["nastepna", "poprzednia", "najnowsze"]),
-                vol.Optional("config_entry_id"): str,
-            }
-        ),
-    )
 
-    async def _przegladaj_terminarz(call) -> None:
-        coordinators = hass.data.get(DOMAIN, {}).get("coordinators", {})
-        entry_id = call.data.get("config_entry_id")
-        coordinator = (
-            coordinators.get(entry_id) if entry_id else next(iter(coordinators.values()), None)
-        )
-        if coordinator is not None:
-            coordinator.async_przegladaj_terminarz(call.data["kierunek"])
-
-    hass.services.async_register(
-        DOMAIN,
-        "przegladaj_terminarz",
-        _przegladaj_terminarz,
-        schema=vol.Schema(
-            {
-                vol.Required("kierunek"): vol.In(["nastepna", "poprzednia", "najnowsze"]),
-                vol.Optional("config_entry_id"): str,
-            }
-        ),
-    )
-
-    async def _przegladaj_plan(call) -> None:
-        coordinators = hass.data.get(DOMAIN, {}).get("coordinators", {})
-        entry_id = call.data.get("config_entry_id")
-        coordinator = (
-            coordinators.get(entry_id) if entry_id else next(iter(coordinators.values()), None)
-        )
-        if coordinator is not None:
-            await coordinator.async_przegladaj_plan(call.data["kierunek"])
-
-    hass.services.async_register(
-        DOMAIN,
-        "przegladaj_plan",
-        _przegladaj_plan,
-        schema=vol.Schema(
-            {
-                vol.Required("kierunek"): vol.In(["nastepny", "poprzedni", "biezacy"]),
-                vol.Optional("config_entry_id"): str,
-            }
-        ),
-    )
-
-    async def _przegladaj_zadania(call) -> None:
-        coordinators = hass.data.get(DOMAIN, {}).get("coordinators", {})
-        entry_id = call.data.get("config_entry_id")
-        coordinator = (
-            coordinators.get(entry_id) if entry_id else next(iter(coordinators.values()), None)
-        )
-        if coordinator is not None:
-            coordinator.async_przegladaj_zadania(call.data["kierunek"])
-
-    hass.services.async_register(
-        DOMAIN,
-        "przegladaj_zadania",
-        _przegladaj_zadania,
-        schema=vol.Schema(
-            {
-                vol.Required("kierunek"): vol.In(["nastepna", "poprzednia", "najnowsze"]),
-                vol.Optional("config_entry_id"): str,
-            }
-        ),
-    )
-
-    async def _przegladaj_oceny(call) -> None:
-        coordinators = hass.data.get(DOMAIN, {}).get("coordinators", {})
-        entry_id = call.data.get("config_entry_id")
-        coordinator = (
-            coordinators.get(entry_id) if entry_id else next(iter(coordinators.values()), None)
-        )
-        if coordinator is not None:
-            coordinator.async_przegladaj_oceny(call.data["kierunek"])
-
-    hass.services.async_register(
-        DOMAIN,
-        "przegladaj_oceny",
-        _przegladaj_oceny,
-        schema=vol.Schema(
-            {
-                vol.Required("kierunek"): vol.In(["nastepna", "poprzednia", "najnowsze"]),
-                vol.Optional("config_entry_id"): str,
-            }
-        ),
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        "pobierz_tresc",
-        _pobierz_tresc,
-        schema=vol.Schema(
-            {
-                vol.Required("indeks"): vol.All(vol.Coerce(int), vol.Range(min=0, max=50)),
-                vol.Optional("config_entry_id"): str,
-            }
-        ),
-    )
+def _wyrejestruj_uslugi(hass: HomeAssistant) -> None:
+    for nazwa in (*_USLUGI, "diagnostyka_ocen"):
+        if hass.services.has_service(DOMAIN, nazwa):
+            hass.services.async_remove(DOMAIN, nazwa)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -669,5 +847,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
         hass.data[DOMAIN].get("coordinators", {}).pop(entry.entry_id, None)
+        if not hass.data[DOMAIN].get("coordinators"):
+            _wyrejestruj_uslugi(hass)  # ostatni wpis - zdejmij uslugi (przy ponownym ladowaniu wroca)
     
     return unload_ok

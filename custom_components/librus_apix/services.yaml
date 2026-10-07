@@ -144,3 +144,15 @@ przegladaj_oceny:
       required: false
       selector:
         text:
+
+diagnostyka_ocen:
+  name: Diagnostyka ocen
+  description: >
+    Pobiera stronę ocen i zapisuje raport (liczba ocen, surowy HTML kilku pierwszych) do pliku
+    librus_apix_diagnostyka_ocen.txt w katalogu konfiguracji HA. Przydatne, gdy oceny się nie pojawiają.
+  fields:
+    config_entry_id:
+      name: Wpis integracji
+      required: false
+      selector:
+        text:
