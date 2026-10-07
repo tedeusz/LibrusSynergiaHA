@@ -2,10 +2,11 @@
 
 import asyncio
 import inspect
+import json
 import logging
 import re
 import traceback
-from datetime import date
+from datetime import date, datetime
 from typing import Dict, Any
 
 import voluptuous as vol
@@ -153,7 +154,279 @@ def _pobierz_strone_ocen(client) -> tuple:
     return html, " | ".join(opis)
 
 
-def _diagnostyka_ocen(html: str, wynik: Any, semestr: int, info: str = "") -> str:
+def _ciasteczka(client) -> dict:
+    """Ciasteczka sesji jako zwykly slownik (jar ma duplikaty nazw z roznych domen - dict(jar) rzuca wyjatek)."""
+    jar = client.cookies
+    try:
+        pary = [(c.name, c.value, c.domain or "") for c in jar]
+    except (TypeError, AttributeError):  # zwykly slownik
+        return dict(jar)
+    wynik: dict = {}
+    for nazwa, wartosc, domena in sorted(pary, key=lambda x: ("synergia" in x[2], x[2])):
+        wynik[nazwa] = wartosc  # na koncu zostaje wartosc z domeny synergia
+    return wynik
+
+
+_GATEWAY_OCENY = ("Grades", "TextGrades", "DescriptiveTextGrades", "DescriptiveGrades", "PointGrades")
+
+
+def _pobierz_gateway_ocen(client, html: str = "", szeroko: bool = False) -> dict:
+    """Oceny z API bramki Synergii (to z niego korzysta aplikacja mobilna).
+
+    Strona WWW ladowala oceny opisowe ("[OO]") pusta, a aplikacja je pokazuje - stad to zrodlo.
+    Zwraca {nazwa: {"status": int|None, "json": obiekt|None, "blad": str}}; nigdy nie rzuca wyjatku.
+    Normalnie pyta tylko o to, co potrzebne; szeroko=True (usluga diagnostyczna) sprawdza dodatkowo
+    stare i alternatywne endpointy.
+    """
+    wynik: dict = {}
+    try:
+        oauth = client.token.oauth or client.refresh_oauth()
+        client.cookies["oauth_token"] = oauth
+    except Exception as ex:  # noqa: BLE001
+        return {"_oauth": {"status": None, "json": None, "blad": str(ex)}}
+    # Oceny opisowe "[OO]" (klasy 1-3): strona WWW ma puste komorki, a jej skrypt pobiera je z tego API
+    from bs4 import BeautifulSoup
+    ids = []
+    uwagi = ""
+    # Identyfikatory uczniow w systemie Auth (LID-AUTH-USER-...) - tak jak robi to strona:
+    # Auth/TokenInfo -> Auth/UserInfo/{lid} -> PartialGrades/Student/{lid ucznia}
+    import requests
+    api = f"{client.BASE_URL}/gateway/api"
+
+    def _get(sciezka):
+        try:
+            r = client.get(f"{api}/{sciezka}")
+            try:
+                dane = r.json()
+            except Exception:  # noqa: BLE001
+                dane = None
+            return r.status_code, dane, ""
+        except Exception as ex:  # noqa: BLE001
+            return None, None, str(ex)
+
+    lidy: list = []
+
+    def _zbierz(dane):
+        for l in re.findall(r"LID-AUTH-USER-[A-Za-z0-9-]+", json.dumps(dane or {}, ensure_ascii=False)):
+            if l not in lidy:
+                lidy.append(l)
+
+    for nazwa, sciezka in (("AUTH:TokenInfo", "2.0/Auth/TokenInfo"),):
+        st, dane, bl = _get(sciezka)
+        wynik[nazwa] = {"status": st, "json": dane, "blad": bl}
+        _zbierz(dane)
+    for lid in list(lidy):
+        st, dane, bl = _get(f"2.0/Auth/UserInfo/{lid}")
+        wynik[f"AUTH:UserInfo:{lid[-6:]}"] = {"status": st, "json": dane, "blad": bl}
+        _zbierz(dane)
+    for nazwa, sciezka in (("AUTH:Users", "2.0/Users"), ("AUTH:Subjects", "3.0/Auth/Subjects")):
+        st, dane, bl = _get(sciezka)
+        wynik[nazwa] = {"status": st, "json": dane, "blad": bl}
+        if nazwa == "AUTH:Users":
+            _zbierz(dane)
+    uczniowie = []
+    for nazwa_u, v_u in wynik.items():
+        if nazwa_u.startswith("AUTH:UserInfo"):
+            lid_u = (v_u.get("json") or {}).get("IdentifierOfStudentAssignedWithUser") if isinstance(v_u.get("json"), dict) else None
+            if lid_u and lid_u not in uczniowie:
+                uczniowie.append(lid_u)
+    ids = list(uczniowie) if uczniowie else lidy[:6]
+    for tr in BeautifulSoup(html or "", "lxml").select("tr.studentRow[data-user_id]"):
+        uid = tr.get("data-user_id")
+        if uid and uid not in ids and not uczniowie:
+            ids.append(uid)
+    punkty = [(f"OO:{uid}", f"Auth/DescriptiveGradingSystem/PartialGrades/Student/{uid}") for uid in ids]
+    if szeroko:
+        punkty.append(("OO:GradingScales", "Auth/DescriptiveGradingSystem/GradingScales"))
+    m = re.search(r'csrfTokenValue\s*=\s*"([^"]+)"', html or "")
+    requestkey = m.group(1) if m else ""
+    for nazwa, sciezka in punkty:
+        uwagi = ""
+        try:
+            adres = f"{client.BASE_URL}/gateway/api/2.0/{sciezka}"
+            if nazwa == "OO:GradingScales":
+                r = client.get(adres)
+            else:
+                # skrypt strony robi POST z pustym JSON-em {} i ciasteczkami sesji (credentials: include)
+                baza = {"User-Agent": "Mozilla/5.0", "Accept": "application/json",
+                        "requestkey": requestkey, "Origin": client.BASE_URL,
+                        "Referer": client.BASE_URL + "/przegladaj_oceny/uczen"}
+                # strona robi fetch z body=JSON.stringify(...) i BEZ naglowka Content-Type (czyli text/plain),
+                # nowa aplikacja wysyla {limit:800,page:1} - sprawdzamy kombinacje, az ktoras przejdzie
+                lim = json.dumps({"limit": 800, "page": 1})
+                kombinacje = [  # (etykieta, tresc, content-type, naglowki autoryzacji)
+                    ("ciastka/text/{}", "{}", "text/plain;charset=UTF-8", {}),
+                    ("ciastka/json/{}", "{}", "application/json", {}),
+                    ("ciastka/json/lim", lim, "application/json", {}),
+                    ("ciastka/text/lim", lim, "text/plain;charset=UTF-8", {}),
+                    ("bearer/json/{}", "{}", "application/json", {"Authorization": f"Bearer {oauth}"}),
+                    ("bearer/json/lim", lim, "application/json", {"Authorization": f"Bearer {oauth}"}),
+                ]
+                proby = []
+                r = None
+                for etykieta, tresc, ctype, nagl_a in kombinacje:
+                    try:
+                        rr = requests.post(adres, data=tresc.encode("utf-8"), cookies=_ciasteczka(client), timeout=30,
+                                           headers={**baza, **nagl_a, "Content-Type": ctype})
+                    except Exception as ex:  # noqa: BLE001
+                        proby.append(f"{etykieta}: {ex}")
+                        continue
+                    proby.append(f"{etykieta}: {rr.status_code}")
+                    r = rr
+                    if rr.status_code < 400:
+                        break
+                if r is None:
+                    raise RuntimeError("; ".join(proby))
+                uwagi = "proby: " + ", ".join(proby) + (" | naglowki odp.: " + str(dict(list(r.headers.items())[:12])) if r.status_code >= 400 else "")
+            try:
+                dane = r.json()
+            except Exception:  # noqa: BLE001
+                dane = None
+            wynik[nazwa] = {"status": r.status_code, "json": dane,
+                            "blad": (uwagi if nazwa != "OO:GradingScales" else "") + ("" if dane is not None else " " + r.text[:200])}
+        except Exception as ex:  # noqa: BLE001
+            wynik[nazwa] = {"status": None, "json": None, "blad": str(ex)}
+    if not szeroko:
+        return wynik
+    # Widok alternatywny Synergii (panel danych ucznia) - tylko diagnostyka
+    for nazwa, sciezka in (("ALT:panel", "/gateway/ms/studentdatapanel/ui/"),):
+        try:
+            r = client.get(client.BASE_URL + sciezka)
+            tytul = re.search(r"<title>(.*?)</title>", r.text, re.S)
+            skrypty = re.findall(r'<script[^>]+src="([^"]+)"', r.text)[:8]
+            wynik[nazwa] = {"status": r.status_code, "json": {"dlugosc": len(r.text), "title": (tytul.group(1).strip() if tytul else ""),
+                            "skrypty": skrypty, "zawiera_Uz": "Uż" in r.text,
+                            "fragment": " ".join(re.sub(r"<[^>]+>", " ", r.text).split())[:600]}, "blad": ""}
+        except Exception as ex:  # noqa: BLE001
+            wynik[nazwa] = {"status": None, "json": None, "blad": str(ex)}
+    for nazwa in (*_GATEWAY_OCENY, "Subjects", "Grades/Categories", "Grades/Comments"):
+        try:
+            r = client.get(f"{client.BASE_URL}/gateway/api/2.0/{nazwa}")
+            try:
+                dane = r.json()
+            except Exception:  # noqa: BLE001
+                dane = None
+            wynik[nazwa] = {"status": r.status_code, "json": dane, "blad": "" if dane is not None else r.text[:200]}
+        except Exception as ex:  # noqa: BLE001
+            wynik[nazwa] = {"status": None, "json": None, "blad": str(ex)}
+    return wynik
+
+
+def _oceny_z_gateway(gw: dict, semestr: int) -> list:
+    """Zamienia odpowiedzi bramki na liste ocen w formacie integracji (tolerancyjnie)."""
+    def _lista(nazwa, klucz=None):
+        dane = (gw.get(nazwa) or {}).get("json")
+        if not isinstance(dane, dict):
+            return []
+        v = dane.get(klucz or nazwa)
+        return v if isinstance(v, list) else []
+
+    przedmioty = {str(x.get("Id")): x.get("Name", "") for x in _lista("Subjects") if isinstance(x, dict)}
+    kategorie = {str(x.get("Id")): x.get("Name", "") for x in _lista("Grades/Categories", "Categories") if isinstance(x, dict)}
+    komentarze = {str(x.get("Id")): x.get("Text", "") for x in _lista("Grades/Comments", "Comments") if isinstance(x, dict)}
+    wynik = []
+    for nazwa in _GATEWAY_OCENY:
+        for g in _lista(nazwa):
+            if not isinstance(g, dict):
+                continue
+            wartosc = str(g.get("Grade") or g.get("Name") or "").strip()
+            if not wartosc:
+                continue
+            sub_id = str(((g.get("Subject") or {}) if isinstance(g.get("Subject"), dict) else {}).get("Id", ""))
+            kat_id = str(((g.get("Category") or {}) if isinstance(g.get("Category"), dict) else {}).get("Id", ""))
+            data = str(g.get("Date") or g.get("AddDate") or "")[:10]
+            sem = g.get("Semester")
+            try:
+                sem = int(sem)
+            except (TypeError, ValueError):
+                try:
+                    sem = _biezacy_semestr(datetime.strptime(data, "%Y-%m-%d").date())
+                except ValueError:
+                    sem = semestr
+            if sem != semestr:
+                continue
+            kom_ids = [str(c.get("Id")) for c in (g.get("Comments") or []) if isinstance(c, dict)]
+            opis = " ".join(komentarze.get(i, "") for i in kom_ids).strip()
+            wynik.append({
+                "subject": przedmioty.get(sub_id) or (g.get("Subject") or {}).get("Name", "") or "?",
+                "grade": wartosc, "date": data, "category": kategorie.get(kat_id, ""),
+                "teacher": "", "semester": sem, "type": "descriptive", "href": "",
+                "desc": opis, "zrodlo": "gateway:" + nazwa,
+            })
+    return wynik
+
+
+def _znajdz_liste(dane: Any) -> list:
+    """Pierwsza lista slownikow w odpowiedzi API (lista albo slownik z lista pod dowolnym kluczem)."""
+    if isinstance(dane, list):
+        return [x for x in dane if isinstance(x, dict)]
+    if isinstance(dane, dict):
+        for v in dane.values():
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                return v
+        for v in dane.values():
+            if isinstance(v, dict):
+                r = _znajdz_liste(v)
+                if r:
+                    return r
+    return []
+
+
+def _oceny_oo_z_gateway(gw: dict, html: str, semestr: int) -> list:
+    """Oceny opisowe (OO) z /Auth/DescriptiveGradingSystem/PartialGrades/Student/{id}."""
+    from bs4 import BeautifulSoup
+    przedmioty = {}
+    for tr in BeautifulSoup(html or "", "lxml").select("tr.studentRow[data-subject_id]"):
+        tds = tr.find_all("td")
+        if len(tds) > 1:
+            przedmioty[str(tr.get("data-subject_id"))] = " ".join(tds[1].get_text().split())
+    for x in _znajdz_liste((gw.get("AUTH:Subjects") or {}).get("json")):
+        nazwa_p = str(x.get("name", x.get("Name", "")) or "")
+        for k in ("identifier", "Identifier", "numericIdentifier", "Id", "id"):
+            if x.get(k) is not None and nazwa_p:
+                przedmioty[str(x.get(k))] = nazwa_p
+    nauczyciele = {}
+    for x in _znajdz_liste((gw.get("AUTH:Users") or {}).get("json")):
+        lid = x.get("AccountId")
+        if lid:
+            nauczyciele[str(lid)] = " ".join(str(p) for p in (x.get("FirstName"), x.get("LastName")) if p).strip()
+    wynik = []
+    for nazwa, v in gw.items():
+        if not nazwa.startswith("OO:") or nazwa == "OO:GradingScales":
+            continue
+        for g in _znajdz_liste(v.get("json")):
+            sv = g.get("scaleValue")
+            wartosc = str((sv.get("value") if isinstance(sv, dict) else sv) or "").strip() or "OO"
+            data = str(g.get("date") or "")[:10]
+            try:
+                sem = int(g.get("semester"))
+            except (TypeError, ValueError):
+                sem = semestr
+            if sem != semestr:
+                continue
+            area = g.get("area") if isinstance(g.get("area"), dict) else {}
+            wym = [str(r.get("name") or r.get("content") or "").strip() for r in (g.get("implementedRequirements") or []) if isinstance(r, dict)]
+            tresc = str(g.get("content") or "").strip()
+            opis = "\n".join(x for x in (
+                f"Obszar: {area.get('name', '')}" if area.get("name") else "",
+                ("Wymagania: " + ", ".join(w for w in wym if w)) if any(wym) else "",
+                f"Opis: {tresc}" if tresc else "",
+                f"Data: {data}" if data else "",
+            ) if x)
+            nazwa_przedmiotu = przedmioty.get(str(g.get("subjectId")), "Przedmiot")
+            if "[OO]" not in nazwa_przedmiotu:
+                nazwa_przedmiotu += " [OO]"
+            nauczyciel = nauczyciele.get(str(g.get("addedBy") or g.get("teacherId") or ""), "") or nauczyciele.get(str(g.get("teacherId") or ""), "")
+            wynik.append({
+                "subject": nazwa_przedmiotu,
+                "grade": wartosc, "date": data, "category": str(area.get("name") or ""),
+                "teacher": nauczyciel, "semester": sem, "type": "descriptive",
+                "href": "", "desc": opis, "zrodlo": "gateway:" + nazwa,
+            })
+    return wynik
+
+
+def _diagnostyka_ocen(html: str, wynik: Any, semestr: int, info: str = "", gw: Any = None) -> str:
     """Czytelny raport do wklejenia w razie problemow z ocenami (bez hasel i tokenow)."""
     from bs4 import BeautifulSoup
 
@@ -226,6 +499,14 @@ def _diagnostyka_ocen(html: str, wynik: Any, semestr: int, info: str = "") -> st
                 break
     if not n_sk:
         linie.append("(brak)")
+    linie.append("")
+    linie.append("API bramki Synergii (to czego uzywa aplikacja mobilna):")
+    for nazwa, v in (gw or {}).items():
+        dane = v.get("json")
+        tekst = json.dumps(dane, ensure_ascii=False)[:(4000 if nazwa.startswith(("OO:", "ALT:", "AUTH:")) else 600)] if dane is not None else ""
+        linie.append(f"  [{nazwa}] status={v.get('status')} {v.get('blad', '')[:900 if nazwa.startswith(('OO:', 'AUTH:')) else 150]}")
+        if tekst:
+            linie.append("     " + tekst)
     linie.append("")
     linie.append("Naglowki i linki zwiazane z ocenami:")
     for h in soup.select("h1, h2, h3, thead th")[:25]:
@@ -336,6 +617,7 @@ class LibrusApiClient:
                 _LOGGER.warning("Strona ocen to publiczny portal Librus (sesja nieaktywna): %s", info)
                 raise TokenError("Grades page returned the logged-out portal page")
             no_access_check(BeautifulSoup(html, "lxml"))  # TokenError, gdy sesja wygasla
+            self._gateway_ocen = _pobierz_gateway_ocen(client, html, getattr(self, "_gateway_szeroko", False))
             return wynik_biblioteki, html, blad
 
         for attempt in range(2):
@@ -401,6 +683,11 @@ class LibrusApiClient:
                 if dodatkowe:
                     _LOGGER.info("Wlasny parser dopisal %d ocen pominietych przez biblioteke", len(dodatkowe))
                     all_grades = all_grades + dodatkowe
+                gw_ocen = getattr(self, "_gateway_ocen", {})
+                dod_gw = _tylko_nowe_oceny(all_grades, _oceny_z_gateway(gw_ocen, current_sem) + _oceny_oo_z_gateway(gw_ocen, html, current_sem))
+                if dod_gw:
+                    _LOGGER.info("API bramki Synergii dopisalo %d ocen", len(dod_gw))
+                    all_grades = all_grades + dod_gw
                 if wynik_biblioteki is None and not all_grades and blad is not None:
                     raise blad
 
@@ -426,9 +713,13 @@ class LibrusApiClient:
 
     async def async_diagnostyka_ocen(self) -> str:
         """Tekst diagnostyczny: co widzi biblioteka, a co wlasny parser na stronie ocen."""
-        wynik = await self.async_get_grades()
+        self._gateway_szeroko = True
+        try:
+            wynik = await self.async_get_grades()
+        finally:
+            self._gateway_szeroko = False
         html = getattr(self, "_ostatnia_strona_ocen", "") or ""
-        return _diagnostyka_ocen(html, wynik, _current_semester(), getattr(self, "_info_pobrania_ocen", ""))
+        return _diagnostyka_ocen(html, wynik, _current_semester(), getattr(self, "_info_pobrania_ocen", ""), getattr(self, "_gateway_ocen", None))
 
     async def async_get_messages(self, count: int = 10, page: int = 0):
         """Pobierz najnowsze wiadomosci (nadawca, temat, data) - bez tresci, zeby nie oznaczac ich jako przeczytane.
