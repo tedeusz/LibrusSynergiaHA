@@ -577,6 +577,27 @@ def _zarejestruj_uslugi(hass: HomeAssistant) -> None:
         ),
     )
 
+    async def _przegladaj_zadania(call) -> None:
+        coordinators = hass.data.get(DOMAIN, {}).get("coordinators", {})
+        entry_id = call.data.get("config_entry_id")
+        coordinator = (
+            coordinators.get(entry_id) if entry_id else next(iter(coordinators.values()), None)
+        )
+        if coordinator is not None:
+            coordinator.async_przegladaj_zadania(call.data["kierunek"])
+
+    hass.services.async_register(
+        DOMAIN,
+        "przegladaj_zadania",
+        _przegladaj_zadania,
+        schema=vol.Schema(
+            {
+                vol.Required("kierunek"): vol.In(["nastepna", "poprzednia", "najnowsze"]),
+                vol.Optional("config_entry_id"): str,
+            }
+        ),
+    )
+
     hass.services.async_register(
         DOMAIN,
         "pobierz_tresc",

@@ -169,6 +169,10 @@ def _build_srednie_librus(avg: Any) -> Dict[str, Dict[str, Optional[float]]]:
 # Pobieraj tresc zadan domowych (osobne zapytanie na kazde zadanie z terminem <= 7 dni).
 # Wylacz (False), jesli nie chcesz dodatkowych zapytan do Librusa.
 POBIERAJ_TRESC_ZADAN = True
+# Tresc zadan pobieramy dla terminow do tylu dni w przod (dalsze zadania sa na liscie bez tresci).
+DNI_TRESCI_ZADAN = 7
+# Ile dni (z jakimkolwiek zadaniem) pokazuje jeden ekran zadan domowych.
+DNI_NA_EKRANIE_ZADAN = 5
 MAX_SZCZEGOLOW_NA_ODSWIEZENIE = 10
 
 # Jak czesto sprawdzac TYLKO nowe wiadomosci (1 zapytanie do Librusa), niezaleznie od
@@ -447,6 +451,66 @@ def _tresc_zadania(szczegoly: Optional[Dict[str, str]]) -> Optional[str]:
     return None
 
 
+def _zadania_wg_dni(
+    zadania: List[Dict[str, Any]], szczegoly: Dict[str, Dict[str, str]], dzis: date
+) -> List[Dict[str, Any]]:
+    """Zadania z terminem od dzis, pogrupowane po dniach (etykieta wzgledna: Dzis / Jutro / Za N dni)."""
+    dni: Dict[str, Dict[str, Any]] = {}
+    for z in zadania or []:
+        termin = _parse_date(z.get("termin"))
+        if termin is None or termin < dzis:
+            continue
+        roznica = (termin - dzis).days
+        dzien = dni.setdefault(
+            termin.isoformat(),
+            {
+                "data": termin.isoformat(),
+                "dni_do": roznica,
+                "etykieta": "Dziś" if roznica == 0 else "Jutro" if roznica == 1 else f"Za {roznica} dni",
+                "dzien": DNI_KROTKO[termin.weekday()],
+                "zadania": [],
+            },
+        )
+        pozycja: Dict[str, Any] = {
+            "przedmiot": z.get("przedmiot", ""),
+            "kategoria": z.get("kategoria", ""),
+            "nauczyciel": z.get("nauczyciel", ""),
+            "lekcja": z.get("lekcja", ""),
+            "data_zadania": z.get("data_zadania", ""),
+        }
+        det = (szczegoly or {}).get(z.get("href"))
+        if det:
+            tresc = _tresc_zadania(det)
+            if tresc:
+                pozycja["tresc"] = tresc
+        dzien["zadania"].append(pozycja)
+    return [dni[k] for k in sorted(dni)]
+
+
+def _zadania_wg_przedmiotow(zadania: List[Dict[str, Any]], dzis: date) -> List[Dict[str, Any]]:
+    """Podsumowanie: przedmiot -> liczba zadan i najblizszy termin (posortowane wg terminu)."""
+    wynik: Dict[str, Dict[str, Any]] = {}
+    for z in zadania or []:
+        termin = _parse_date(z.get("termin"))
+        if termin is None or termin < dzis:
+            continue
+        w = wynik.setdefault(z.get("przedmiot", ""), {"przedmiot": z.get("przedmiot", ""), "liczba": 0, "najblizszy": termin})
+        w["liczba"] += 1
+        w["najblizszy"] = min(w["najblizszy"], termin)
+    return sorted(
+        (
+            {
+                "przedmiot": w["przedmiot"],
+                "liczba": w["liczba"],
+                "najblizszy_termin": w["najblizszy"].isoformat(),
+                "najblizszy_dni": (w["najblizszy"] - dzis).days,
+            }
+            for w in wynik.values()
+        ),
+        key=lambda w: (w["najblizszy_termin"], w["przedmiot"]),
+    )
+
+
 # --- Identyfikatory (do wykrywania nowych wpisow) -------------------------------
 
 
@@ -614,6 +678,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._widok_lista: Optional[List[Dict[str, Any]]] = None
         self._ogl_przesuniecie = 0
         self._term_przesuniecie = 0
+        self._zad_przesuniecie = 0
         self._plan_tydzien = 0  # przesuniecie widoku planu w tygodniach (0 = biezacy tydzien szkolny)
         self._plan_dodatkowy: Dict[str, List[Dict[str, Any]]] = {}  # dni spoza danych bazowych
         self._tresci_store: Optional[Store] = (
@@ -734,6 +799,41 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             for iso in dni:
                 self._plan_dodatkowy[iso] = plan.get(iso, [])  # pusta lista = pobrane, brak lekcji
         self._plan_tydzien = nowe
+        self.async_update_listeners()
+        return True
+
+    def widok_zadan(self) -> Dict[str, Any]:
+        """Ekran zadan domowych: DNI_NA_EKRANIE_ZADAN kolejnych dni z zadaniami (pozycje od 1)."""
+        d = self.data or {}
+        dni = _zadania_wg_dni(d.get("zadania") or [], d.get("zadania_szczegoly") or {}, _dzis())
+        przes = min(self._zad_przesuniecie, max(0, len(dni) - 1))
+        czesc = dni[przes : przes + DNI_NA_EKRANIE_ZADAN]
+        return {
+            "od": przes + 1 if czesc else 0,
+            "do": przes + len(czesc),
+            "razem": len(dni),
+            "najnowsze": przes == 0,
+            "wg_dni": czesc,
+        }
+
+    def async_przegladaj_zadania(self, kierunek: str) -> bool:
+        """Przesun ekran zadan ("nastepna" = pozniejsze terminy, "poprzednia", "najnowsze"); bez zapytan."""
+        d = self.data or {}
+        dni = _zadania_wg_dni(d.get("zadania") or [], d.get("zadania_szczegoly") or {}, _dzis())
+        przes = min(self._zad_przesuniecie, max(0, len(dni) - 1))
+        if kierunek == "najnowsze":
+            nowe = 0
+        elif kierunek == "nastepna":
+            nowe = przes + DNI_NA_EKRANIE_ZADAN
+            if nowe >= len(dni):
+                return False
+        elif kierunek == "poprzednia":
+            if przes == 0:
+                return False
+            nowe = max(0, przes - DNI_NA_EKRANIE_ZADAN)
+        else:
+            return False
+        self._zad_przesuniecie = nowe
         self.async_update_listeners()
         return True
 
@@ -1157,7 +1257,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 h: d for h, d in self._homework_details.items() if h in aktualne
             }
             if POBIERAJ_TRESC_ZADAN:
-                granica = _dzis() + timedelta(days=7)
+                granica = _dzis() + timedelta(days=DNI_TRESCI_ZADAN)
                 brakujace = []
                 for z in zadania:
                     href = z.get("href")

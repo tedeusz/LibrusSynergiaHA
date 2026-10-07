@@ -42,6 +42,7 @@ from .coordinator import (
     _suma_wag,
     _tematy_wg_dni,
     _terminarz_wg_dni,
+    _zadania_wg_przedmiotow,
     _tresc_zadania,
     _wpis_kompakt,
 )
@@ -600,7 +601,7 @@ class LibrusZadaniaDomoweSensor(_LibrusSensor):
     """Zadania domowe z terminem w ciagu 7 dni (z trescia, jesli udalo sie pobrac)."""
 
     _odswiez_o_polnocy = True
-    _unrecorded_attributes = frozenset({"zadania_7_dni"})
+    _unrecorded_attributes = frozenset({"zadania_7_dni", "przegladanie", "przedmioty"})
 
     def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
         super().__init__(
@@ -657,6 +658,10 @@ class LibrusZadaniaDomoweSensor(_LibrusSensor):
             "najblizszy_termin": zadania[0]["termin"] if zadania else None,
             "wg_przedmiotu": wg_przedmiotu,
             "zadania_7_dni": zadania,
+            # Ekran przegladania wszystkich zadan (usluga librus_apix.przegladaj_zadania)
+            "przegladanie": self.coordinator.widok_zadan(),
+            # Podsumowanie: przedmiot -> liczba zadan i najblizszy termin
+            "przedmioty": _zadania_wg_przedmiotow(self._data.get("zadania", []), _dzis()),
         }
 
 
