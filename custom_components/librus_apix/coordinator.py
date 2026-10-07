@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_change, async_track_time_interval
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
@@ -47,6 +48,29 @@ def _czysty(text: Any) -> str:
 def _wiadomosc_id(msg: Dict[str, Any]) -> Any:
     """ID wiadomosci: href; gdy brak (np. wiadomosc systemowa) - nadawca+temat+data."""
     return msg.get("href") or (msg.get("author", ""), msg.get("title", ""), msg.get("date", ""))
+
+
+def _czysta_tresc(text: Any, limit: int = 2000) -> str:
+    """Tresc wiadomosci: zbij spacje w liniach, zostaw akapity, przytnij do `limit` znakow."""
+    wynik: List[str] = []
+    pusta = False
+    for linia in str(text or "").replace("\r", "\n").split("\n"):
+        linia = " ".join(linia.split())
+        if not linia:
+            pusta = True
+            continue
+        if pusta and wynik:
+            wynik.append("")
+        pusta = False
+        wynik.append(linia)
+    tekst = "\n".join(wynik).strip()
+    return tekst if len(tekst) <= limit else tekst[: limit - 1].rstrip() + "…"
+
+
+def _tresc_klucz(msg: Dict[str, Any]) -> str:
+    """Klucz tekstowy wiadomosci do zapisu tresci (JSON wymaga kluczy tekstowych)."""
+    wid = _wiadomosc_id(msg)
+    return wid if isinstance(wid, str) else "|".join(str(x) for x in wid)
 
 
 def _dzis() -> date:
@@ -157,6 +181,25 @@ ZDARZENIA_INTERWAL = timedelta(minutes=15)
 # Plan lekcji (2 zapytania na cykl) - np. timedelta(minutes=60), jesli zalezy Ci na szybkich
 # zastepstwach. None = tylko pelne odswiezenie (SCAN_INTERVAL, 2 h).
 PLAN_INTERWAL = None
+
+# Ile wiadomosci pokazuje jeden ekran przegladania (tyle kafelkow ma pulpit Wiadomosci).
+ROZMIAR_WIDOKU = 5
+# Ile wiadomosci pobierac z jednej strony Librusa przy przegladaniu starszych.
+WIADOMOSCI_NA_STRONE = 100
+
+# Tresc wiadomosci. UWAGA: pobranie tresci OTWIERA wiadomosc w Librusie, czyli oznacza ja
+# jako przeczytana (nauczyciel widzi status "przeczytana"). Tryb pobierania:
+#   "po_otwarciu" (domyslny, bezpieczniejszy) - nic nie jest pobierane w tle; tresc pobiera
+#       dopiero klikniecie wiadomosci na liscie (usluga librus_apix.pobierz_tresc), zapisywana na stale.
+#   "od_razu" - tresc kazdej NOWEJ wiadomosci (wykrytej po uruchomieniu) jest pobierana w tle,
+#       zapisywana i trafia do zdarzenia/powiadomienia (pole "tresc").
+TRYB_TRESCI_WIADOMOSCI = "po_otwarciu"
+# Ogranicz do nadawcow, ktorych nazwa zawiera jeden z fragmentow (bez wielkosci liter),
+# np. ("Kowalska", "Nowak"). Pusta krotka = wszyscy nadawcy.
+TRESC_WIADOMOSCI_NADAWCY: Tuple[str, ...] = ()
+MAX_TRESCI_NA_CYKL = 5
+# Ile tresci trzymac w pamieci HA (najstarsze wypadaja). None = bez limitu, historia na zawsze.
+MAX_TRESCI_W_PAMIECI: Optional[int] = None
 
 # Stan czujnikow sredniej: True = srednia wazona (jak w Librusie), False = arytmetyczna.
 # Obie wartosci sa zawsze dostepne w atrybutach.
@@ -483,6 +526,18 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._seen_schedule_ids: set = set()
         self._seen_attendance_ids: set = set()
         self._api_lock = asyncio.Lock()
+        self._tresci: Dict[str, str] = {}
+        self._otwarta: Optional[Dict[str, Any]] = None
+        # Przegladanie starszych wiadomosci: strona Librusa, przesuniecie na niej i jej tresc.
+        # Domyslnie (strona 0, przesuniecie 0) widok jest "zywy" i pochodzi z self.data.
+        self._strona = 0
+        self._przesuniecie = 0
+        self._widok_lista: Optional[List[Dict[str, Any]]] = None
+        self._tresci_store: Optional[Store] = (
+            Store(hass, 1, f"{DOMAIN}_wiadomosci_{config_entry.entry_id}")
+            if config_entry is not None
+            else None
+        )
         self._seen_announcement_ids: set = set()
         self._homework_details: Dict[str, Dict[str, str]] = {}
         self._first_run: bool = True
@@ -498,6 +553,159 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         """Pobierz aktualne dane z API Librus (pelne odswiezenie, wylacznie z szybkim sprawdzaniem)."""
         async with self._api_lock:
             return await self._pobierz_dane()
+
+    async def async_wczytaj_tresci(self) -> None:
+        """Wczytaj zapisane tresci wiadomosci (przezywaja restart HA)."""
+        if self._tresci_store is None:
+            return
+        try:
+            zapisane = await self._tresci_store.async_load()
+            if isinstance(zapisane, dict):
+                self._tresci = {str(k): str(v) for k, v in zapisane.items()}
+        except Exception as err:
+            _LOGGER.warning("Nie udalo sie wczytac zapisanych tresci wiadomosci: %s", err)
+
+    def _zapisz_tresci(self) -> None:
+        if MAX_TRESCI_W_PAMIECI:
+            while len(self._tresci) > MAX_TRESCI_W_PAMIECI:
+                self._tresci.pop(next(iter(self._tresci)))
+        if self._tresci_store is not None:
+            self._tresci_store.async_delay_save(lambda: dict(self._tresci), 5)
+
+    @staticmethod
+    def _nadawca_pasuje(msg: Dict[str, Any]) -> bool:
+        if not TRESC_WIADOMOSCI_NADAWCY:
+            return True
+        autor = msg.get("author", "").lower()
+        return any(f.lower() in autor for f in TRESC_WIADOMOSCI_NADAWCY)
+
+    async def _dociagnij_tresci(self, wiadomosci: List[Dict]) -> None:
+        """Pobierz tresc NOWYCH wiadomosci (jeszcze niewidzianych); wolac PRZED _fire_events."""
+        if TRYB_TRESCI_WIADOMOSCI != "od_razu":
+            return
+        pobrano, zmiana = 0, False
+        for msg in wiadomosci:
+            if _wiadomosc_id(msg) in self._seen_message_hrefs:
+                continue  # stare wiadomosci nie sa otwierane (oznaczylyby sie jako przeczytane)
+            if not msg.get("href") or not self._nadawca_pasuje(msg):
+                continue
+            klucz = _tresc_klucz(msg)
+            if klucz not in self._tresci:
+                if pobrano >= MAX_TRESCI_NA_CYKL:
+                    break
+                pobrano += 1
+                try:
+                    surowa = await self.client.async_get_message_content(msg["href"])
+                except Exception as err:
+                    _LOGGER.warning("Pobranie tresci wiadomosci nie powiodlo sie: %s", err)
+                    surowa = None
+                tresc = _czysta_tresc(surowa)
+                if not tresc:
+                    continue  # powiadomienie wyjdzie bez tresci
+                self._tresci[klucz] = tresc
+                zmiana = True
+            msg["tresc"] = self._tresci[klucz]
+        if zmiana:
+            self._zapisz_tresci()
+
+    def widok(self) -> List[Dict[str, Any]]:
+        """Wiadomosci aktualnego ekranu (ROZMIAR_WIDOKU sztuk): najnowsze albo starsze po przegladaniu."""
+        if self._widok_lista is None:
+            return ((self.data or {}).get("wiadomosci") or [])[:ROZMIAR_WIDOKU]
+        return self._widok_lista[self._przesuniecie : self._przesuniecie + ROZMIAR_WIDOKU]
+
+    def opis_widoku(self) -> Dict[str, Any]:
+        """Polozenie ekranu: numer strony Librusa i pozycje (od 1)."""
+        n = len(self.widok())
+        return {
+            "strona": self._strona + 1,
+            "od": self._przesuniecie + 1 if n else 0,
+            "do": self._przesuniecie + n,
+            "najnowsze": self._widok_lista is None,
+        }
+
+    async def _pobierz_strone(self, strona: int) -> Optional[List[Dict[str, Any]]]:
+        messages = await self.client.async_get_messages(
+            count=WIADOMOSCI_NA_STRONE, page=strona
+        )
+        return None if messages is None else self._build_wiadomosci(messages)
+
+    async def async_przegladaj(self, kierunek: str) -> bool:
+        """Przesun ekran o ROZMIAR_WIDOKU: "nastepna" (starsze), "poprzednia" (nowsze), "najnowsze".
+
+        Samo listowanie NIE otwiera wiadomosci (nie zmienia statusu przeczytania).
+        """
+        async with self._api_lock:
+            strona, przes, lista = self._strona, self._przesuniecie, self._widok_lista
+            if kierunek == "najnowsze":
+                strona, przes, lista = 0, 0, None
+            elif kierunek == "nastepna":
+                if lista is None:
+                    lista = await self._pobierz_strone(strona)
+                    if lista is None:
+                        return False
+                if przes + ROZMIAR_WIDOKU < len(lista):
+                    przes += ROZMIAR_WIDOKU
+                else:
+                    nowa = await self._pobierz_strone(strona + 1)
+                    if not nowa or (lista and nowa[0].get("href") == lista[0].get("href")):
+                        return False  # to byla ostatnia strona
+                    strona, przes, lista = strona + 1, 0, nowa
+            elif kierunek == "poprzednia":
+                if przes >= ROZMIAR_WIDOKU:
+                    przes -= ROZMIAR_WIDOKU
+                elif strona > 0:
+                    nowa = await self._pobierz_strone(strona - 1)
+                    if not nowa:
+                        return False
+                    strona, lista = strona - 1, nowa
+                    przes = ((len(nowa) - 1) // ROZMIAR_WIDOKU) * ROZMIAR_WIDOKU
+                else:
+                    return False
+            else:
+                return False
+            if strona == 0 and przes == 0:
+                lista = None  # wracamy do zywego widoku najnowszych
+            self._strona, self._przesuniecie, self._widok_lista = strona, przes, lista
+        self.async_update_listeners()
+        return True
+
+    async def async_pobierz_tresc(self, indeks: int) -> bool:
+        """Pobierz (raz, na stale) i pokaz tresc wiadomosci z pozycji `indeks` na liscie.
+
+        Wolane po kliknieciu wiadomosci na pulpicie. UWAGA: otwiera wiadomosc w Librusie
+        (oznacza jako przeczytana). Zapisana juz tresc nie jest pobierana ponownie.
+        """
+        async with self._api_lock:
+            lista = self.widok()
+            if not 0 <= indeks < len(lista):
+                _LOGGER.warning("Brak wiadomosci na pozycji %s", indeks)
+                return False
+            msg = lista[indeks]
+            klucz = _tresc_klucz(msg)
+            if klucz not in self._tresci:
+                if not msg.get("href"):
+                    return False
+                try:
+                    surowa = await self.client.async_get_message_content(msg["href"])
+                except Exception as err:
+                    _LOGGER.warning("Pobranie tresci wiadomosci nie powiodlo sie: %s", err)
+                    return False
+                tresc = _czysta_tresc(surowa)
+                if not tresc:
+                    return False
+                self._tresci[klucz] = tresc
+                self._zapisz_tresci()
+            msg["tresc"] = self._tresci[klucz]
+            self._otwarta = {
+                "nadawca": msg.get("author", ""),
+                "temat": msg.get("title", ""),
+                "data": msg.get("date", ""),
+                "ma_zalacznik": msg.get("has_attachment", False),
+                "tresc": msg["tresc"],
+            }
+        self.async_update_listeners()
+        return True
 
     def async_uruchom_odswiezanie(self, config_entry: ConfigEntry) -> None:
         """Uruchom warstwowe odswiezanie: wiadomosci, zdarzenia (oceny itd.) i opcjonalnie plan.
@@ -599,9 +807,10 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         try:
             async with self._api_lock:
                 messages = await self.client.async_get_messages(count=10)
-            if messages is None:
-                return
-            wiadomosci = self._build_wiadomosci(messages)
+                if messages is None:
+                    return
+                wiadomosci = self._build_wiadomosci(messages)
+                await self._dociagnij_tresci(wiadomosci)
             self._fire_events(wiadomosci, [])
             if wiadomosci != self.data.get("wiadomosci"):
                 # Bez async_set_updated_data: ono przesuwa termin pelnego odswiezenia.
@@ -727,6 +936,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 for o in ogloszenia:
                     self._seen_announcement_ids.add((o["tytul"], o["data"], o["autor"]))
             else:
+                await self._dociagnij_tresci(wiadomosci)
                 self._fire_events(wiadomosci, grades)
                 self._fire_homework_events(zadania)
                 self._fire_schedule_events(terminarz)
@@ -776,7 +986,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
 
     def _fire_events(self, messages: List[Dict], grades: List[Dict]) -> None:
         """Wyslij zdarzenia HA dla nowych wiadomosci i ocen."""
-        for msg in messages:
+        for indeks, msg in enumerate(messages):
             msg_id = _wiadomosc_id(msg)
             if msg_id not in self._seen_message_hrefs:
                 self._seen_message_hrefs.add(msg_id)
@@ -789,6 +999,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                         "data": msg.get("date", ""),
                         "ma_zalacznik": msg.get("has_attachment", False),
                         "nieprzeczytana": msg.get("unread", False),
+                        "tresc": msg.get("tresc", ""),
+                        "indeks": indeks,
                     },
                 )
 
@@ -877,6 +1089,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         result = []
         for msg in messages or []:
             msg["jest_nowa"] = _jest_nowa(msg.get("date", ""))
+            msg["tresc"] = self._tresci.get(_tresc_klucz(msg), "")
             result.append(msg)
         return result
 

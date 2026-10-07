@@ -179,7 +179,7 @@ class LibrusApiClient:
                 if attempt == 1:
                     return None
 
-    async def async_get_messages(self, count: int = 10):
+    async def async_get_messages(self, count: int = 10, page: int = 0):
         """Pobierz najnowsze wiadomosci (nadawca, temat, data) - bez tresci, zeby nie oznaczac ich jako przeczytane.
 
         Przy bledzie innym niz TokenError zwraca None bez resetu sesji (funkcja jest wolana
@@ -188,7 +188,7 @@ class LibrusApiClient:
         from librus_apix.messages import get_received
 
         def _fetch(client):
-            return (get_received(client, 0) or [])[:count]
+            return (get_received(client, page) or [])[:count]
 
         messages = await self._async_call("messages", _fetch)
         if messages is None:
@@ -208,6 +208,15 @@ class LibrusApiClient:
             }
             for msg in messages
         ]
+
+    async def async_get_message_content(self, href: str):
+        """Pobierz tresc wiadomosci. UWAGA: otwiera wiadomosc w Librusie (oznacza jako przeczytana)."""
+        from librus_apix.messages import message_content
+
+        data = await self._async_call(
+            "message content", lambda client: message_content(client, href)
+        )
+        return data.content if data else None
 
     async def async_get_homework(self):
         """Pobierz zadania domowe z terminem od dzis wzwyz.
@@ -463,6 +472,56 @@ async def async_setup(hass: HomeAssistant, config: Dict[str, Any]) -> bool:
     return True
 
 
+def _zarejestruj_uslugi(hass: HomeAssistant) -> None:
+    """Usluga librus_apix.pobierz_tresc: pobiera i pokazuje tresc klikniętej wiadomosci."""
+    if hass.services.has_service(DOMAIN, "przegladaj"):
+        return
+
+    async def _pobierz_tresc(call) -> None:
+        coordinators = hass.data.get(DOMAIN, {}).get("coordinators", {})
+        entry_id = call.data.get("config_entry_id")
+        coordinator = (
+            coordinators.get(entry_id) if entry_id else next(iter(coordinators.values()), None)
+        )
+        if coordinator is None:
+            _LOGGER.warning("pobierz_tresc: brak aktywnej integracji Librus")
+            return
+        await coordinator.async_pobierz_tresc(int(call.data["indeks"]))
+
+    async def _przegladaj(call) -> None:
+        coordinators = hass.data.get(DOMAIN, {}).get("coordinators", {})
+        entry_id = call.data.get("config_entry_id")
+        coordinator = (
+            coordinators.get(entry_id) if entry_id else next(iter(coordinators.values()), None)
+        )
+        if coordinator is not None:
+            await coordinator.async_przegladaj(call.data["kierunek"])
+
+    hass.services.async_register(
+        DOMAIN,
+        "przegladaj",
+        _przegladaj,
+        schema=vol.Schema(
+            {
+                vol.Required("kierunek"): vol.In(["nastepna", "poprzednia", "najnowsze"]),
+                vol.Optional("config_entry_id"): str,
+            }
+        ),
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        "pobierz_tresc",
+        _pobierz_tresc,
+        schema=vol.Schema(
+            {
+                vol.Required("indeks"): vol.All(vol.Coerce(int), vol.Range(min=0, max=50)),
+                vol.Optional("config_entry_id"): str,
+            }
+        ),
+    )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Librus APIX from a config entry."""
     username = entry.data[CONF_USERNAME]
@@ -476,6 +535,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return False
     
     coordinator = LibrusDataUpdateCoordinator(hass, client, entry)
+    await coordinator.async_wczytaj_tresci()
     await coordinator.async_config_entry_first_refresh()
     coordinator.async_uruchom_odswiezanie(entry)
 
@@ -483,6 +543,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = client
     hass.data[DOMAIN].setdefault("coordinators", {})[entry.entry_id] = coordinator
     
+    _zarejestruj_uslugi(hass)
+
     # Setup platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     

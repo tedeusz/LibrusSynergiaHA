@@ -1,0 +1,44 @@
+pobierz_tresc:
+  name: Pobierz treść wiadomości
+  description: >
+    Pobiera (raz, zapisuje na stałe) i pokazuje treść wiadomości z podanej pozycji listy.
+    Uwaga - otwiera wiadomość w Librusie, czyli oznacza ją jako przeczytaną.
+  fields:
+    indeks:
+      name: Pozycja na liście
+      description: Numer wiadomości na liście (0 = najnowsza).
+      required: true
+      example: 0
+      selector:
+        number:
+          min: 0
+          max: 50
+    config_entry_id:
+      name: Wpis integracji
+      description: Opcjonalnie, gdy skonfigurowano kilku uczniów.
+      required: false
+      selector:
+        text:
+
+
+przegladaj:
+  name: Przeglądaj wiadomości
+  description: >
+    Przesuwa ekran listy wiadomości o 5 pozycji w stronę starszych lub nowszych
+    (pobiera kolejne strony Librusa). Samo listowanie nie oznacza wiadomości jako przeczytanych.
+  fields:
+    kierunek:
+      name: Kierunek
+      required: true
+      example: nastepna
+      selector:
+        select:
+          options:
+            - nastepna
+            - poprzednia
+            - najnowsze
+    config_entry_id:
+      name: Wpis integracji
+      required: false
+      selector:
+        text:

@@ -47,7 +47,7 @@ from .coordinator import (
 
 _LOGGER = logging.getLogger(__name__)
 
-MAX_OGLOSZEN_W_ATRYBUTACH = 10
+MAX_OGLOSZEN_W_ATRYBUTACH = 60
 
 
 async def async_setup_entry(
@@ -415,7 +415,9 @@ class LibrusZadaniaSensor(CoordinatorEntity, SensorEntity):
 
 
 class LibrusWiadomosciSensor(CoordinatorEntity, SensorEntity):
-    """Czujnik z wiadomosciami (temat i nadawca, bez pobierania tresci)."""
+    """Czujnik z wiadomosciami (nadawca, temat, a dla nowych wiadomosci takze tresc)."""
+
+    _unrecorded_attributes = frozenset({"wiadomosci", "otwarta", "przegladanie"})
 
     def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
         """Inicjalizacja."""
@@ -448,11 +450,29 @@ class LibrusWiadomosciSensor(CoordinatorEntity, SensorEntity):
                     "nieprzeczytana": m.get("unread", False),
                     "jest_nowa": m.get("jest_nowa", False),
                     "ma_zalacznik": m.get("has_attachment", False),
+                    "tresc": (m.get("tresc") or "")[:1000],
                 }
                 for m in msgs
             ],
             "liczba_nieprzeczytanych": sum(1 for m in msgs if m.get("unread", False)),
             "sa_nowe_wiadomosci": any(m.get("jest_nowa", False) for m in msgs),
+            # Ostatnio otwarta (kliknieta) wiadomosc z trescia - patrz usluga librus_apix.pobierz_tresc
+            "otwarta": self.coordinator._otwarta or {},
+            # Aktualny ekran przegladania (usluga librus_apix.przegladaj); domyslnie najnowsze
+            "przegladanie": {
+                **self.coordinator.opis_widoku(),
+                "wiadomosci": [
+                    {
+                        "nadawca": m["author"],
+                        "temat": m["title"],
+                        "data": m["date"],
+                        "nieprzeczytana": m.get("unread", False),
+                        "jest_nowa": m.get("jest_nowa", False),
+                        "ma_zalacznik": m.get("has_attachment", False),
+                    }
+                    for m in self.coordinator.widok()
+                ],
+            },
         }
 
 
@@ -722,7 +742,7 @@ class LibrusOgloszeniaSensor(_LibrusSensor):
             "ostatnie_ogloszenie": lista[0]["tytul"] if lista else None,
             "sa_nowe": any(o["jest_nowe"] for o in lista),
             "ogloszenia": [
-                {**o, "tresc": o["tresc"][:600]} for o in lista[:MAX_OGLOSZEN_W_ATRYBUTACH]
+                {**o, "tresc": o["tresc"][:500]} for o in lista[:MAX_OGLOSZEN_W_ATRYBUTACH]
             ],
         }
 
