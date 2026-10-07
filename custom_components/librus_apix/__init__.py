@@ -33,6 +33,15 @@ def _current_semester() -> int:
     """
     return _biezacy_semestr(dt_util.now().date())
 
+def _termin_od(termin: str, dzis) -> bool:
+    """True, gdy termin ("2026-10-09 piatek") to dzis lub pozniej; nieczytelny termin zostaje."""
+    from datetime import datetime as _dt
+    try:
+        return _dt.strptime(str(termin).strip()[:10], "%Y-%m-%d").date() >= dzis
+    except ValueError:
+        return True
+
+
 PLATFORMS = ["sensor", "binary_sensor", "calendar"]
 
 CONFIG_SCHEMA = vol.Schema(
@@ -201,42 +210,45 @@ class LibrusApiClient:
         ]
 
     async def async_get_homework(self):
-        """Get upcoming homework assignments from Librus (next 30 days)."""
-        for attempt in range(2):
-            try:
-                if not self._client or not self._token:
-                    if not await self.async_authenticate():
-                        return None
+        """Pobierz zadania domowe z terminem od dzis wzwyz.
 
-                from librus_apix.homework import get_homework
-                from datetime import date as _date, timedelta
+        Filtr dat w Librusie (dataOd/dataDo) najpewniej dotyczy DATY ZADANIA, a nie terminu
+        (biblioteka w swoich powiadomieniach pyta o zakres [dzis-7, dzis]). Samo okno
+        [dzis, dzis+30] pomijalo wiec zadania zadane wczoraj z terminem za tydzien.
+        Pytamy o oba okna - zadane w ostatnich 30 dniach i na najblizsze 30 dni - i laczymy.
+        """
+        from librus_apix.homework import get_homework
+        from datetime import timedelta
 
-                today = dt_util.now().date()
-                date_from = today.strftime("%Y-%m-%d")
-                date_to = (today + timedelta(days=30)).strftime("%Y-%m-%d")
+        def _fetch(client):
+            today = dt_util.now().date()
+            okna = (
+                (today - timedelta(days=30), today),
+                (today, today + timedelta(days=30)),
+            )
+            wynik, widziane, pobrano, blad = [], set(), 0, None
+            for od, do in okna:
+                try:
+                    lista = get_homework(client, od.isoformat(), do.isoformat())
+                except TokenError:
+                    raise
+                except Exception as ex:
+                    blad = ex
+                    _LOGGER.debug("Homework window %s..%s unavailable: %s", od, do, ex)
+                    continue
+                pobrano += 1
+                for hw in lista:
+                    klucz = hw.href or (hw.subject, hw.lesson, hw.task_date, hw.completion_date)
+                    if klucz in widziane:
+                        continue
+                    widziane.add(klucz)
+                    wynik.append(hw)
+            if not pobrano:
+                raise blad  # oba zapytania nieudane
+            # tylko zadania z terminem dzis lub pozniej (jak dotad)
+            return [hw for hw in wynik if _termin_od(hw.completion_date, today)]
 
-                loop = asyncio.get_running_loop()
-                return await loop.run_in_executor(
-                    None, get_homework, self._client, date_from, date_to
-                )
-
-            except TokenError:
-                _LOGGER.warning(
-                    "Token expired fetching homework (attempt %d/2), re-authenticating...",
-                    attempt + 1,
-                )
-                self._reset_auth()
-                if attempt == 1:
-                    _LOGGER.error("Failed to get homework after re-authentication.")
-                    return None
-            except Exception as ex:
-                _LOGGER.error(
-                    "Failed to get homework (attempt %d/2): %s\n%s",
-                    attempt + 1, ex, traceback.format_exc(),
-                )
-                self._reset_auth()
-                if attempt == 1:
-                    return None
+        return await self._async_call("homework", _fetch)
 
     async def async_get_schedule(self):
         """Get upcoming calendar events from Librus (current + next month, filtered to future dates)."""
