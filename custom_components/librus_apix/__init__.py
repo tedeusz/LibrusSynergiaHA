@@ -213,6 +213,14 @@ def _pobierz_gateway_ocen(client, html: str = "", szeroko: bool = False) -> dict
 
     for nazwa, sciezka in (("AUTH:TokenInfo", "2.0/Auth/TokenInfo"),):
         st, dane, bl = _get(sciezka)
+        if st != 200:
+            # token oauth mogl wygasnac - odswiez i sprobuj jeszcze raz
+            try:
+                oauth = client.refresh_oauth() or oauth
+                client.cookies["oauth_token"] = oauth
+                st, dane, bl = _get(sciezka)
+            except Exception as ex:  # noqa: BLE001
+                bl = f"{bl} | odswiezenie tokenu: {ex}"
         wynik[nazwa] = {"status": st, "json": dane, "blad": bl}
         _zbierz(dane)
     for lid in list(lidy):
@@ -370,6 +378,23 @@ def _znajdz_liste(dane: Any) -> list:
                 if r:
                     return r
     return []
+
+
+def _gateway_oo_ok(gw: dict) -> bool:
+    """Czy API Synergii zwrocilo (nawet pusta) liste ocen opisowych z kodem 200."""
+    return any(k.startswith("OO:") and k != "OO:GradingScales" and v.get("status") == 200 and isinstance(v.get("json"), dict)
+               for k, v in (gw or {}).items())
+
+
+def _status_gateway(gw: dict) -> str:
+    """Kody odpowiedzi API Synergii do logu, np. 'TokenInfo=200, PartialGrades=403'."""
+    czesci = []
+    for k, v in (gw or {}).items():
+        if k == "AUTH:TokenInfo":
+            czesci.append(f"TokenInfo={v.get('status')}")
+        elif k.startswith("OO:") and k != "OO:GradingScales":
+            czesci.append(f"PartialGrades={v.get('status')}")
+    return ", ".join(czesci) or "brak odpowiedzi"
 
 
 def _oceny_oo_z_gateway(gw: dict, html: str, semestr: int) -> list:
@@ -684,7 +709,17 @@ class LibrusApiClient:
                     _LOGGER.info("Wlasny parser dopisal %d ocen pominietych przez biblioteke", len(dodatkowe))
                     all_grades = all_grades + dodatkowe
                 gw_ocen = getattr(self, "_gateway_ocen", {})
-                dod_gw = _tylko_nowe_oceny(all_grades, _oceny_z_gateway(gw_ocen, current_sem) + _oceny_oo_z_gateway(gw_ocen, html, current_sem))
+                oo_gw = _oceny_oo_z_gateway(gw_ocen, html, current_sem)
+                if _gateway_oo_ok(gw_ocen):
+                    self._cache_oo = (current_sem, oo_gw)
+                else:
+                    ost = getattr(self, "_cache_oo", None)
+                    oo_gw = ost[1] if ost and ost[0] == current_sem else []
+                    _LOGGER.warning(
+                        "API Synergii nie zwrocilo ocen opisowych (%s) - uzywam ostatnich znanych (%d)",
+                        _status_gateway(gw_ocen), len(oo_gw),
+                    )
+                dod_gw = _tylko_nowe_oceny(all_grades, _oceny_z_gateway(gw_ocen, current_sem) + oo_gw)
                 if dod_gw:
                     _LOGGER.info("API bramki Synergii dopisalo %d ocen", len(dod_gw))
                     all_grades = all_grades + dod_gw

@@ -1167,6 +1167,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
 
                 nowe = dict(self.data)
                 grades = grades_raw["oceny"] if grades_raw else None
+                if grades == [] and self.data.get("oceny"):
+                    grades = None  # pusta lista przy poprzednich ocenach = chwilowy blad pobierania
                 if grades is not None:
                     nowe["oceny"] = grades
                     nowe["oceny_wg_przedmiotu"] = self._grupuj_oceny(grades)
@@ -1234,6 +1236,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             student_info = await self.client.async_get_student_information()
             grades_raw = await self.client.async_get_grades()
             grades = grades_raw["oceny"] if grades_raw else None
+            if grades == [] and (self.data or {}).get("oceny"):
+                grades = None  # pusta lista przy poprzednich ocenach = chwilowy blad pobierania
             messages = await self.client.async_get_messages(count=10)
             homework_raw = await self.client.async_get_homework()
             schedule_raw = await self.client.async_get_schedule()
