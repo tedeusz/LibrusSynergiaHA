@@ -533,6 +533,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._strona = 0
         self._przesuniecie = 0
         self._widok_lista: Optional[List[Dict[str, Any]]] = None
+        self._ogl_przesuniecie = 0
         self._tresci_store: Optional[Store] = (
             Store(hass, 1, f"{DOMAIN}_wiadomosci_{config_entry.entry_id}")
             if config_entry is not None
@@ -607,6 +608,42 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             msg["tresc"] = self._tresci[klucz]
         if zmiana:
             self._zapisz_tresci()
+
+    def widok_ogloszen(self) -> Dict[str, Any]:
+        """Ekran ogloszen (ROZMIAR_WIDOKU sztuk) z calej listy; pozycje liczone od 1."""
+        lista = (self.data or {}).get("ogloszenia") or []
+        przes = min(self._ogl_przesuniecie, max(0, len(lista) - 1))
+        czesc = lista[przes : przes + ROZMIAR_WIDOKU]
+        return {
+            "od": przes + 1 if czesc else 0,
+            "do": przes + len(czesc),
+            "razem": len(lista),
+            "najnowsze": przes == 0,
+            "ogloszenia": czesc,
+        }
+
+    def async_przegladaj_ogloszenia(self, kierunek: str) -> bool:
+        """Przesun ekran ogloszen: "nastepna" (starsze), "poprzednia" (nowsze), "najnowsze".
+
+        Lista ogloszen jest pobierana w calosci przy pelnym odswiezeniu, wiec bez zapytan do Librusa.
+        """
+        lista = (self.data or {}).get("ogloszenia") or []
+        przes = min(self._ogl_przesuniecie, max(0, len(lista) - 1))
+        if kierunek == "najnowsze":
+            nowe = 0
+        elif kierunek == "nastepna":
+            nowe = przes + ROZMIAR_WIDOKU
+            if nowe >= len(lista):
+                return False
+        elif kierunek == "poprzednia":
+            if przes == 0:
+                return False
+            nowe = max(0, przes - ROZMIAR_WIDOKU)
+        else:
+            return False
+        self._ogl_przesuniecie = nowe
+        self.async_update_listeners()
+        return True
 
     def widok(self) -> List[Dict[str, Any]]:
         """Wiadomosci aktualnego ekranu (ROZMIAR_WIDOKU sztuk): najnowsze albo starsze po przegladaniu."""

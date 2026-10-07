@@ -42,3 +42,23 @@ przegladaj:
       required: false
       selector:
         text:
+
+przegladaj_ogloszenia:
+  name: Przeglądaj ogłoszenia
+  description: Przesuwa ekran listy ogłoszeń szkoły o 5 pozycji (bez zapytań do Librusa).
+  fields:
+    kierunek:
+      name: Kierunek
+      required: true
+      example: nastepna
+      selector:
+        select:
+          options:
+            - nastepna
+            - poprzednia
+            - najnowsze
+    config_entry_id:
+      name: Wpis integracji
+      required: false
+      selector:
+        text:
