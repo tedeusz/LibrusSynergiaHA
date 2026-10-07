@@ -16,7 +16,10 @@ from homeassistant.helpers import config_validation as cv
 from librus_apix.client import Client, new_client
 from librus_apix.exceptions import TokenError
 
+from homeassistant.util import dt as dt_util
+
 from .const import DOMAIN, SCAN_INTERVAL
+from .coordinator import LibrusDataUpdateCoordinator, _biezacy_semestr
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,10 +31,9 @@ def _current_semester() -> int:
     Semestr 2: luty (2) - czerwiec (6)
     Lipiec-sierpien to wakacje - zwracamy 2 (ostatni semestr roku).
     """
-    m = date.today().month
-    return 1 if m >= 9 else 2
+    return _biezacy_semestr(dt_util.now().date())
 
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "binary_sensor", "calendar"]
 
 CONFIG_SCHEMA = vol.Schema(
     {
@@ -79,7 +81,7 @@ class LibrusApiClient:
                 return False
 
     async def async_get_grades(self):
-        """Get grades from Librus."""
+        """Get grades from Librus: {"oceny": [...], "srednie_librus": {...}} albo None."""
         for attempt in range(2):
             try:
                 if not self._client or not self._token:
@@ -113,7 +115,11 @@ class LibrusApiClient:
                                 'category': grade.category,
                                 'teacher': getattr(grade, 'teacher', ''),
                                 'semester': grade.semester,
-                                'type': 'numeric'
+                                'type': 'numeric',
+                                'weight': grade.weight,
+                                'counts': grade.counts,
+                                'href': grade.href,
+                                'desc': grade.desc,
                             })
 
                 # Process descriptive grades (only current semester, many are actually numeric)
@@ -133,10 +139,18 @@ class LibrusApiClient:
                                     'category': getattr(desc_grade, 'desc', '').split('\n')[0] if hasattr(desc_grade, 'desc') else '',
                                     'teacher': getattr(desc_grade, 'teacher', ''),
                                     'semester': desc_grade.semester,
-                                    'type': 'descriptive'
+                                    'type': 'descriptive',
+                                    'href': getattr(desc_grade, 'href', ''),
+                                    'desc': getattr(desc_grade, 'desc', ''),
                                 })
 
-                return all_grades
+                # Oficjalne srednie Librusa: {przedmiot: {semestr: gpa}}, semestr 0 = roczna
+                srednie_librus = {
+                    subject: {g.semester: g.gpa for g in gpa_list}
+                    for subject, gpa_list in average_grades.items()
+                }
+
+                return {"oceny": all_grades, "srednie_librus": srednie_librus}
 
             except TokenError as ex:
                 _LOGGER.warning(
@@ -214,7 +228,7 @@ class LibrusApiClient:
                 from librus_apix.homework import get_homework
                 from datetime import date as _date, timedelta
 
-                today = _date.today()
+                today = dt_util.now().date()
                 date_from = today.strftime("%Y-%m-%d")
                 date_to = (today + timedelta(days=30)).strftime("%Y-%m-%d")
 
@@ -253,7 +267,7 @@ class LibrusApiClient:
                 from datetime import date as _date
                 import calendar
 
-                today = _date.today()
+                today = dt_util.now().date()
                 loop = asyncio.get_running_loop()
 
                 def _fetch_two_months():
@@ -336,7 +350,7 @@ class LibrusApiClient:
         from datetime import date as _date, datetime as _datetime, timedelta
 
         def _fetch(client):
-            today = _date.today()
+            today = dt_util.now().date()
             monday = today - timedelta(days=today.weekday())
             periods = []
             fetched = False
@@ -392,6 +406,29 @@ class LibrusApiClient:
 
         return await self._async_call("homework details", _fetch)
 
+    async def async_get_announcements(self):
+        """Pobierz ogloszenia szkoly (lista Announcement)."""
+        from librus_apix.announcements import get_announcements
+
+        return await self._async_call("announcements", get_announcements)
+
+    async def async_get_completed_lessons(self):
+        """Pobierz zrealizowane lekcje z tematami (ostatnie 4 dni, max 4 strony)."""
+        from datetime import timedelta
+        from librus_apix.completed_lessons import get_completed, get_max_page_number
+
+        def _fetch(client):
+            today = dt_util.now().date()
+            date_from = (today - timedelta(days=3)).isoformat()
+            date_to = today.isoformat()
+            pages = max(1, min(get_max_page_number(client, date_from, date_to), 4))
+            lessons = []
+            for page in range(pages):
+                lessons.extend(get_completed(client, date_from, date_to, page))
+            return lessons
+
+        return await self._async_call("completed lessons", _fetch)
+
     async def async_get_student_information(self):
         """Get student information from Librus."""
         try:
@@ -443,8 +480,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.error("Failed to authenticate")
         return False
     
+    coordinator = LibrusDataUpdateCoordinator(hass, client, entry)
+    await coordinator.async_config_entry_first_refresh()
+
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = client
+    hass.data[DOMAIN].setdefault("coordinators", {})[entry.entry_id] = coordinator
     
     # Setup platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -458,5 +499,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
+        hass.data[DOMAIN].get("coordinators", {}).pop(entry.entry_id, None)
     
     return unload_ok
