@@ -1,5 +1,6 @@
 """Wspolna logika integracji Librus APIX: koordynator danych, helpery i baza encji."""
 import asyncio
+import re
 import logging
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -184,6 +185,10 @@ PLAN_INTERWAL = None
 
 # Ile wiadomosci pokazuje jeden ekran przegladania (tyle kafelkow ma pulpit Wiadomosci).
 ROZMIAR_WIDOKU = 5
+# Ile dni (z jakimkolwiek zdarzeniem) pokazuje jeden ekran terminarza.
+DNI_NA_EKRANIE_TERMINARZA = 5
+# Ile tygodni wstecz i w przod mozna przegladac w planie lekcji.
+MAX_TYGODNI_PLANU = 12
 # Ile wiadomosci pobierac z jednej strony Librusa przy przegladaniu starszych.
 WIADOMOSCI_NA_STRONE = 100
 
@@ -208,6 +213,80 @@ SREDNIA_WAZONA = True
 DNI_TYGODNIA = [
     "poniedzialek", "wtorek", "sroda", "czwartek", "piatek", "sobota", "niedziela",
 ]
+
+# Terminarz: rodzaje zdarzen rozpoznawane po slowach kluczowych w tytule/przedmiocie.
+# Kolejnosc ma znaczenie (pierwsze dopasowanie wygrywa). Mozesz dopisac wlasne wzorce (regex).
+TYPY_ZDARZEN = (
+    ("sprawdzian", "🔴", "Sprawdzian", r"sprawdzian|praca klasowa|klas[oó]wk|egzamin"),
+    ("kartkowka", "🟠", "Kartkówka", r"kartk[oó]wk"),
+    ("nieobecnosc_nauczyciela", "🟣", "Nieobecność nauczyciela", r"nieobecno"),
+    ("zastepstwo", "🟡", "Zastępstwo", r"zast[eę]pstw"),
+    ("wolne", "🟢", "Dzień wolny", r"święto|swieto|wolne|ferie|wakacje|przerwa świąteczna"),
+    ("wycieczka", "🚌", "Wycieczka", r"wycieczk"),
+    ("zebranie", "👥", "Zebranie / rada", r"zebranie|wywiad[oó]wk|rada pedagogiczna|konsultacj"),
+    ("zadanie", "🔵", "Zadanie", r"zadanie|praca domowa"),
+)
+TYP_DOMYSLNY = ("wydarzenie", "📌", "Wydarzenie")
+DNI_KROTKO = ["Pon", "Wt", "Śr", "Czw", "Pt", "Sob", "Ndz"]
+_PREFIKS_TYPU = re.compile(
+    r"^(sprawdzian|praca klasowa|klas[oó]wka|kartk[oó]wka|zast[eę]pstwo|nieobecno[sś][cć]|nauczyciel)\s*[:\-–]?\s*",
+    re.IGNORECASE,
+)
+
+
+def _klasyfikuj_zdarzenie(z: Dict[str, Any]) -> Dict[str, Any]:
+    """Zdarzenie terminarza -> typ, ikona, etykieta i czytelny opis (bez powtorzen)."""
+    tekst = f"{z.get('przedmiot') or ''} {z.get('tytul') or ''}".lower()
+    typ = next((t for t in TYPY_ZDARZEN if re.search(t[3], tekst)), None)
+    kod, ikona, etykieta = (typ[:3] if typ else TYP_DOMYSLNY)
+    czesci: List[str] = []
+    for klucz in ("przedmiot", "tytul"):
+        t = _czysty(z.get(klucz))
+        if not t or t in ("unspecified", "unknown"):
+            continue
+        if typ:  # sama nazwa typu ("Nieobecność:") nie niesie informacji, wiec ja zdejmujemy
+            t = _PREFIKS_TYPU.sub("", t).strip()
+        if t and t not in czesci:
+            czesci.append(t)
+    szcz = z.get("szczegoly") or {}
+    dodatkowy = _czysty(szcz.get("Opis")) if isinstance(szcz, dict) else ""
+    if dodatkowy in ("", "unknown"):
+        dodatkowy = ""
+    numer = z.get("numer_lekcji")
+    return {
+        "typ": kod,
+        "ikona": ikona,
+        "etykieta": etykieta,
+        "opis": " · ".join(czesci) or _czysty(z.get("tytul")),
+        "dodatkowy": dodatkowy,
+        "numer_lekcji": numer if isinstance(numer, int) else None,
+        "godzina": z.get("godzina") if z.get("godzina") not in (None, "", "unknown") else None,
+    }
+
+
+def _terminarz_wg_dni(terminarz: List[Dict[str, Any]], dzis: date) -> List[Dict[str, Any]]:
+    """Grupuje zdarzenia po dniach (od dzis), z etykieta wzgledna: Dzis / Jutro / Za N dni."""
+    dni: Dict[str, Dict[str, Any]] = {}
+    for z in terminarz or []:
+        d = _parse_date(z.get("data"))
+        if d is None or d < dzis:
+            continue
+        roznica = (d - dzis).days
+        dzien = dni.setdefault(
+            d.isoformat(),
+            {
+                "data": d.isoformat(),
+                "dni_do": roznica,
+                "etykieta": "Dziś" if roznica == 0 else "Jutro" if roznica == 1 else f"Za {roznica} dni",
+                "dzien": DNI_KROTKO[d.weekday()],
+                "zdarzenia": [],
+            },
+        )
+        dzien["zdarzenia"].append(_klasyfikuj_zdarzenie(z))
+    for dzien in dni.values():  # w obrebie dnia: wg numeru lekcji, bez numeru na koncu
+        dzien["zdarzenia"].sort(key=lambda e: (e["numer_lekcji"] is None, e["numer_lekcji"] or 0))
+    return [dni[k] for k in sorted(dni)]
+
 
 SYMBOL_NIEOBECNOSC = "nb"
 SYMBOL_USPRAWIEDLIWIONA = "u"
@@ -534,6 +613,9 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._przesuniecie = 0
         self._widok_lista: Optional[List[Dict[str, Any]]] = None
         self._ogl_przesuniecie = 0
+        self._term_przesuniecie = 0
+        self._plan_tydzien = 0  # przesuniecie widoku planu w tygodniach (0 = biezacy tydzien szkolny)
+        self._plan_dodatkowy: Dict[str, List[Dict[str, Any]]] = {}  # dni spoza danych bazowych
         self._tresci_store: Optional[Store] = (
             Store(hass, 1, f"{DOMAIN}_wiadomosci_{config_entry.entry_id}")
             if config_entry is not None
@@ -608,6 +690,85 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             msg["tresc"] = self._tresci[klucz]
         if zmiana:
             self._zapisz_tresci()
+
+    def widok_planu(self) -> Dict[str, Any]:
+        """Plan wybranego tygodnia (pon-pt): z danych bazowych albo pobrany na zadanie."""
+        poniedzialek = _poniedzialek_tygodnia_szkolnego(_dzis()) + timedelta(weeks=self._plan_tydzien)
+        dni = [(poniedzialek + timedelta(days=i)).isoformat() for i in range(5)]
+        baza = (self.data or {}).get("plan") or {}
+        plan = {
+            iso: baza[iso] if iso in baza else self._plan_dodatkowy[iso]
+            for iso in dni
+            if iso in baza or iso in self._plan_dodatkowy
+        }
+        return {
+            "przesuniecie": self._plan_tydzien,
+            "od": dni[0],
+            "do": dni[-1],
+            "biezacy": self._plan_tydzien == 0,
+            "plan": plan,
+            "liczba_zmian": sum(1 for l in plan.values() for x in l if x.get("zmiana")),
+        }
+
+    async def async_przegladaj_plan(self, kierunek: str) -> bool:
+        """Przesun widok planu o tydzien ("nastepny", "poprzedni", "biezacy"); brakujacy tydzien jest pobierany."""
+        if kierunek == "biezacy":
+            nowe = 0
+        elif kierunek == "nastepny":
+            nowe = self._plan_tydzien + 1
+        elif kierunek == "poprzedni":
+            nowe = self._plan_tydzien - 1
+        else:
+            return False
+        if abs(nowe) > MAX_TYGODNI_PLANU:
+            return False
+        poniedzialek = _poniedzialek_tygodnia_szkolnego(_dzis()) + timedelta(weeks=nowe)
+        dni = [(poniedzialek + timedelta(days=i)).isoformat() for i in range(5)]
+        baza = (self.data or {}).get("plan") or {}
+        if not any(iso in baza or iso in self._plan_dodatkowy for iso in dni):
+            async with self._api_lock:
+                surowy = await self.client.async_get_timetable(poniedzialki=[poniedzialek])
+            if surowy is None:
+                return False  # blad pobierania - zostajemy na biezacym ekranie
+            plan = _build_plan(surowy)
+            for iso in dni:
+                self._plan_dodatkowy[iso] = plan.get(iso, [])  # pusta lista = pobrane, brak lekcji
+        self._plan_tydzien = nowe
+        self.async_update_listeners()
+        return True
+
+    def widok_terminarza(self) -> Dict[str, Any]:
+        """Ekran terminarza: DNI_NA_EKRANIE_TERMINARZA kolejnych dni ze zdarzeniami (pozycje od 1)."""
+        dni = _terminarz_wg_dni((self.data or {}).get("terminarz") or [], _dzis())
+        przes = min(self._term_przesuniecie, max(0, len(dni) - 1))
+        czesc = dni[przes : przes + DNI_NA_EKRANIE_TERMINARZA]
+        return {
+            "od": przes + 1 if czesc else 0,
+            "do": przes + len(czesc),
+            "razem": len(dni),
+            "najnowsze": przes == 0,
+            "wg_dni": czesc,
+        }
+
+    def async_przegladaj_terminarz(self, kierunek: str) -> bool:
+        """Przesun ekran terminarza ("nastepna" = pozniejsze dni, "poprzednia", "najnowsze"); bez zapytan do Librusa."""
+        dni = _terminarz_wg_dni((self.data or {}).get("terminarz") or [], _dzis())
+        przes = min(self._term_przesuniecie, max(0, len(dni) - 1))
+        if kierunek == "najnowsze":
+            nowe = 0
+        elif kierunek == "nastepna":
+            nowe = przes + DNI_NA_EKRANIE_TERMINARZA
+            if nowe >= len(dni):
+                return False
+        elif kierunek == "poprzednia":
+            if przes == 0:
+                return False
+            nowe = max(0, przes - DNI_NA_EKRANIE_TERMINARZA)
+        else:
+            return False
+        self._term_przesuniecie = nowe
+        self.async_update_listeners()
+        return True
 
     def widok_ogloszen(self) -> Dict[str, Any]:
         """Ekran ogloszen (ROZMIAR_WIDOKU sztuk) z calej listy; pozycje liczone od 1."""

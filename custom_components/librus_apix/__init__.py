@@ -348,27 +348,32 @@ class LibrusApiClient:
                 _LOGGER.debug("Traceback (%s):\n%s", label, traceback.format_exc())
                 return None
 
-    async def async_get_timetable(self):
-        """Pobierz plan lekcji: biezacy i nastepny tydzien (plaska lista Period)."""
+    async def async_get_timetable(self, poniedzialki=None):
+        """Pobierz plan lekcji (plaska lista Period).
+
+        Domyslnie biezacy i nastepny tydzien; `poniedzialki` (lista dat) - dowolne inne tygodnie.
+        """
         from librus_apix.timetable import get_timetable
-        from datetime import date as _date, datetime as _datetime, timedelta
+        from datetime import datetime as _datetime, timedelta
 
         def _fetch(client):
-            today = dt_util.now().date()
-            monday = today - timedelta(days=today.weekday())
+            if poniedzialki is None:
+                today = dt_util.now().date()
+                monday = today - timedelta(days=today.weekday())
+                tygodnie = [monday, monday + timedelta(days=7)]
+            else:
+                tygodnie = list(poniedzialki)
             periods = []
             fetched = False
-            for offset in (0, 7):
-                week_monday = _datetime.combine(
-                    monday + timedelta(days=offset), _datetime.min.time()
-                )
+            for monday_date in tygodnie:
+                week_monday = _datetime.combine(monday_date, _datetime.min.time())
                 try:
                     week = get_timetable(client, week_monday)
                 except TokenError:
                     raise
                 except Exception as ex:
                     # np. wakacje / tydzien bez planu - nie traktuj jako bledu krytycznego
-                    _LOGGER.debug("Timetable for week %s unavailable: %s", week_monday.date(), ex)
+                    _LOGGER.debug("Timetable for week %s unavailable: %s", monday_date, ex)
                     continue
                 fetched = True
                 for day in week:
@@ -525,6 +530,48 @@ def _zarejestruj_uslugi(hass: HomeAssistant) -> None:
         schema=vol.Schema(
             {
                 vol.Required("kierunek"): vol.In(["nastepna", "poprzednia", "najnowsze"]),
+                vol.Optional("config_entry_id"): str,
+            }
+        ),
+    )
+
+    async def _przegladaj_terminarz(call) -> None:
+        coordinators = hass.data.get(DOMAIN, {}).get("coordinators", {})
+        entry_id = call.data.get("config_entry_id")
+        coordinator = (
+            coordinators.get(entry_id) if entry_id else next(iter(coordinators.values()), None)
+        )
+        if coordinator is not None:
+            coordinator.async_przegladaj_terminarz(call.data["kierunek"])
+
+    hass.services.async_register(
+        DOMAIN,
+        "przegladaj_terminarz",
+        _przegladaj_terminarz,
+        schema=vol.Schema(
+            {
+                vol.Required("kierunek"): vol.In(["nastepna", "poprzednia", "najnowsze"]),
+                vol.Optional("config_entry_id"): str,
+            }
+        ),
+    )
+
+    async def _przegladaj_plan(call) -> None:
+        coordinators = hass.data.get(DOMAIN, {}).get("coordinators", {})
+        entry_id = call.data.get("config_entry_id")
+        coordinator = (
+            coordinators.get(entry_id) if entry_id else next(iter(coordinators.values()), None)
+        )
+        if coordinator is not None:
+            await coordinator.async_przegladaj_plan(call.data["kierunek"])
+
+    hass.services.async_register(
+        DOMAIN,
+        "przegladaj_plan",
+        _przegladaj_plan,
+        schema=vol.Schema(
+            {
+                vol.Required("kierunek"): vol.In(["nastepny", "poprzedni", "biezacy"]),
                 vol.Optional("config_entry_id"): str,
             }
         ),

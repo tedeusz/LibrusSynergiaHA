@@ -62,3 +62,45 @@ przegladaj_ogloszenia:
       required: false
       selector:
         text:
+
+przegladaj_terminarz:
+  name: Przeglądaj terminarz
+  description: Przesuwa ekran terminarza o 5 dni ze zdarzeniami (bez zapytań do Librusa).
+  fields:
+    kierunek:
+      name: Kierunek
+      required: true
+      example: nastepna
+      selector:
+        select:
+          options:
+            - nastepna
+            - poprzednia
+            - najnowsze
+    config_entry_id:
+      name: Wpis integracji
+      required: false
+      selector:
+        text:
+
+przegladaj_plan:
+  name: Przeglądaj plan lekcji
+  description: >
+    Przesuwa widok planu o tydzień (do 12 tygodni wstecz i w przód). Tygodnie spoza danych bazowych
+    są pobierane z Librusa na żądanie.
+  fields:
+    kierunek:
+      name: Kierunek
+      required: true
+      example: nastepny
+      selector:
+        select:
+          options:
+            - nastepny
+            - poprzedni
+            - biezacy
+    config_entry_id:
+      name: Wpis integracji
+      required: false
+      selector:
+        text:

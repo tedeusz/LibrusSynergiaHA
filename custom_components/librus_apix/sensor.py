@@ -41,6 +41,7 @@ from .coordinator import (
     _srednia_wazona,
     _suma_wag,
     _tematy_wg_dni,
+    _terminarz_wg_dni,
     _tresc_zadania,
     _wpis_kompakt,
 )
@@ -346,40 +347,6 @@ class LibrusSredniaPrzedmiotuSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class LibrusTerminarzSensor(CoordinatorEntity, SensorEntity):
-    """Czujnik z nadchodzacymi zdarzeniami z kalendarza Librusa (biezacy + nastepny miesiac)."""
-
-    def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
-        """Inicjalizacja."""
-        super().__init__(coordinator)
-        self._config_entry = config_entry
-        self._attr_has_entity_name = False
-        self._attr_name = "Terminarz"
-        self._attr_unique_id = f"{config_entry.entry_id}_terminarz"
-        self._attr_icon = "mdi:calendar-month"
-
-    @property
-    def device_info(self) -> Dict[str, Any]:
-        return _device_info(self.coordinator, self._config_entry)
-
-    @property
-    def native_value(self) -> int:
-        return len((self.coordinator.data or {}).get("terminarz", []))
-
-    @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
-        terminarz = (self.coordinator.data or {}).get("terminarz", [])
-        typy: Dict[str, int] = {}
-        for z in terminarz:
-            t = z.get("tytul", "")
-            typy[t] = typy.get(t, 0) + 1
-        return {
-            "zdarzenia": terminarz,
-            "liczba_zdarzen": len(terminarz),
-            "typy": typy,
-        }
-
-
 class LibrusZadaniaSensor(CoordinatorEntity, SensorEntity):
     """Czujnik z nadchodzacymi zadaniami i sprawdzianami (30 dni do przodu)."""
 
@@ -497,6 +464,45 @@ class _LibrusSensor(LibrusEntityMixin, CoordinatorEntity, SensorEntity):
         self._init_librus(config_entry, name, unique_suffix, icon)
 
 
+class LibrusTerminarzSensor(_LibrusSensor):
+    """Terminarz Librusa (biezacy + nastepny miesiac): zdarzenia pogrupowane po dniach i rozpoznane wg typu."""
+
+    _odswiez_o_polnocy = True
+    _unrecorded_attributes = frozenset({"zdarzenia", "wg_dni", "dzis", "najblizsze_testy", "przegladanie"})
+
+    def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "Terminarz", "terminarz", "mdi:calendar-month")
+
+    @property
+    def native_value(self) -> int:
+        return len(self._data.get("terminarz", []))
+
+    @property
+    def extra_state_attributes(self) -> Dict[str, Any]:
+        terminarz = self._data.get("terminarz", [])
+        wg_dni = _terminarz_wg_dni(terminarz, _dzis())
+        typy: Dict[str, int] = {}
+        testy: List[Dict[str, Any]] = []
+        for dzien in wg_dni:
+            for e in dzien["zdarzenia"]:
+                typy[e["etykieta"]] = typy.get(e["etykieta"], 0) + 1
+                if e["typ"] in ("sprawdzian", "kartkowka"):
+                    testy.append({**e, "data": dzien["data"], "dni_do": dzien["dni_do"], "etykieta_dnia": dzien["etykieta"]})
+        dzis = next((d["zdarzenia"] for d in wg_dni if d["dni_do"] == 0), [])
+        return {
+            "zdarzenia": terminarz,  # surowe dane (zgodnosc wsteczna)
+            "wg_dni": wg_dni,
+            "dzis": dzis,
+            "liczba_dzis": len(dzis),
+            "liczba_7_dni": sum(len(d["zdarzenia"]) for d in wg_dni if d["dni_do"] <= 7),
+            "liczba_zdarzen": len(terminarz),
+            "najblizsze_testy": testy[:5],
+            "typy": typy,
+            # Aktualny ekran przegladania (usluga librus_apix.przegladaj_terminarz)
+            "przegladanie": self.coordinator.widok_terminarza(),
+        }
+
+
 class LibrusPlanLekcjiSensor(_LibrusSensor):
     """Plan lekcji na dzis albo na najblizszy nastepny dzien nauki."""
 
@@ -547,7 +553,7 @@ class LibrusPlanTygodniaSensor(_LibrusSensor):
     """Plan lekcji na caly tydzien (w weekend pokazuje nadchodzacy tydzien)."""
 
     _odswiez_o_polnocy = True
-    _unrecorded_attributes = frozenset({"plan"})
+    _unrecorded_attributes = frozenset({"plan", "przegladanie"})
 
     def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
         super().__init__(
@@ -571,9 +577,12 @@ class LibrusPlanTygodniaSensor(_LibrusSensor):
     @property
     def extra_state_attributes(self) -> Dict[str, Any]:
         tydzien = self._tydzien()
+        # Widok przegladania (usluga librus_apix.przegladaj_plan): dowolny tydzien, domyslnie biezacy
+        przegladanie = self.coordinator.widok_planu()
         if not tydzien:
-            return {}
+            return {"przegladanie": przegladanie}
         return {
+            "przegladanie": przegladanie,
             "tydzien_od": min(tydzien),
             "tydzien_do": max(tydzien),
             "lekcji_wg_dni": {
