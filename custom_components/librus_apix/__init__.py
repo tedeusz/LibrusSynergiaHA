@@ -303,6 +303,95 @@ class LibrusApiClient:
                 if attempt == 1:
                     return None
 
+    async def _async_call(self, label: str, func):
+        """Wykonaj func(client) w watku; przy TokenError zaloguj ponownie i sprobuj jeszcze raz.
+
+        Dla funkcji opcjonalnych (plan lekcji, frekwencja): inne bledy niz TokenError
+        zwracaja None BEZ resetu sesji, zeby nie wymuszac ponownego logowania co odswiezenie.
+        """
+        for attempt in range(2):
+            try:
+                if not self._client or not self._token:
+                    if not await self.async_authenticate():
+                        return None
+                loop = asyncio.get_running_loop()
+                return await loop.run_in_executor(None, func, self._client)
+            except TokenError:
+                _LOGGER.warning(
+                    "Token expired fetching %s (attempt %d/2), re-authenticating...",
+                    label, attempt + 1,
+                )
+                self._reset_auth()
+                if attempt == 1:
+                    _LOGGER.error("Failed to get %s after re-authentication.", label)
+                    return None
+            except Exception as ex:
+                _LOGGER.warning("Failed to get %s: %s", label, ex)
+                _LOGGER.debug("Traceback (%s):\n%s", label, traceback.format_exc())
+                return None
+
+    async def async_get_timetable(self):
+        """Pobierz plan lekcji: biezacy i nastepny tydzien (plaska lista Period)."""
+        from librus_apix.timetable import get_timetable
+        from datetime import date as _date, datetime as _datetime, timedelta
+
+        def _fetch(client):
+            today = _date.today()
+            monday = today - timedelta(days=today.weekday())
+            periods = []
+            fetched = False
+            for offset in (0, 7):
+                week_monday = _datetime.combine(
+                    monday + timedelta(days=offset), _datetime.min.time()
+                )
+                try:
+                    week = get_timetable(client, week_monday)
+                except TokenError:
+                    raise
+                except Exception as ex:
+                    # np. wakacje / tydzien bez planu - nie traktuj jako bledu krytycznego
+                    _LOGGER.debug("Timetable for week %s unavailable: %s", week_monday.date(), ex)
+                    continue
+                fetched = True
+                for day in week:
+                    periods.extend(day)
+            return periods if fetched else None
+
+        return await self._async_call("timetable", _fetch)
+
+    async def async_get_attendance(self):
+        """Pobierz wpisy frekwencji (lista dwoch list: semestr 1 i semestr 2)."""
+        from librus_apix.attendance import get_attendance
+
+        return await self._async_call(
+            "attendance", lambda client: get_attendance(client, "all")
+        )
+
+    async def async_get_attendance_frequency(self):
+        """Pobierz frekwencje procentowa: krotka (semestr 1, semestr 2, ogolem), wartosci 0-1."""
+        from librus_apix.attendance import get_attendance_frequency
+
+        return await self._async_call("attendance frequency", get_attendance_frequency)
+
+    async def async_get_homework_details(self, hrefs):
+        """Pobierz szczegoly (tresc) zadan domowych: {href: {etykieta: wartosc}}."""
+        if not hrefs:
+            return {}
+        from librus_apix.homework import homework_detail
+
+        def _fetch(client):
+            details = {}
+            for href in hrefs:
+                try:
+                    details[href] = homework_detail(client, href)
+                except TokenError:
+                    raise
+                except Exception as ex:
+                    _LOGGER.debug("Homework detail %s unavailable: %s", href, ex)
+            return details
+
+        return await self._async_call("homework details", _fetch)
+
     async def async_get_student_information(self):
         """Get student information from Librus."""
         try:
