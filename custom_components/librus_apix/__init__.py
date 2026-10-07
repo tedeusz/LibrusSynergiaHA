@@ -171,51 +171,34 @@ class LibrusApiClient:
                     return None
 
     async def async_get_messages(self, count: int = 10):
-        """Get latest messages from Librus (subject and sender only, no content fetch to avoid marking as read)."""
-        for attempt in range(2):
-            try:
-                if not self._client or not self._token:
-                    if not await self.async_authenticate():
-                        return None
-                client = self._client
+        """Pobierz najnowsze wiadomosci (nadawca, temat, data) - bez tresci, zeby nie oznaczac ich jako przeczytane.
 
-                from librus_apix.messages import get_received
+        Przy bledzie innym niz TokenError zwraca None bez resetu sesji (funkcja jest wolana
+        co kilka minut, wiec nie moze wymuszac ponownego logowania ani zasmiecac logu bledami).
+        """
+        from librus_apix.messages import get_received
 
-                loop = asyncio.get_running_loop()
-                messages = await loop.run_in_executor(None, get_received, client, 0)
-                messages = messages[:count] if messages else []
+        def _fetch(client):
+            return (get_received(client, 0) or [])[:count]
 
-                result = [
-                    {
-                        "author": msg.author,
-                        "title": msg.title,
-                        "date": msg.date,
-                        "href": msg.href,
-                        "unread": msg.unread,
-                        "has_attachment": msg.has_attachment,
-                    }
-                    for msg in messages
-                ]
+        messages = await self._async_call("messages", _fetch)
+        if messages is None:
+            return None
 
-                return result
+        def _czysty(text: Any) -> str:
+            return " ".join(str(text or "").split())
 
-            except TokenError as ex:
-                _LOGGER.warning(
-                    "Token expired fetching messages (attempt %d/2), re-authenticating...",
-                    attempt + 1,
-                )
-                self._reset_auth()
-                if attempt == 1:
-                    _LOGGER.error("Failed to get messages after re-authentication.")
-                    return None
-            except Exception as ex:
-                _LOGGER.error(
-                    "Failed to get messages (attempt %d/2): %s\n%s",
-                    attempt + 1, ex, traceback.format_exc(),
-                )
-                self._reset_auth()
-                if attempt == 1:
-                    return None
+        return [
+            {
+                "author": _czysty(msg.author),
+                "title": _czysty(msg.title),
+                "date": _czysty(msg.date),
+                "href": msg.href,
+                "unread": msg.unread,
+                "has_attachment": msg.has_attachment,
+            }
+            for msg in messages
+        ]
 
     async def async_get_homework(self):
         """Get upcoming homework assignments from Librus (next 30 days)."""
@@ -482,6 +465,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     coordinator = LibrusDataUpdateCoordinator(hass, client, entry)
     await coordinator.async_config_entry_first_refresh()
+    coordinator.async_uruchom_odswiezanie(entry)
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = client

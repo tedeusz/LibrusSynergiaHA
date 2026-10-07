@@ -1,11 +1,12 @@
 """Wspolna logika integracji Librus APIX: koordynator danych, helpery i baza encji."""
+import asyncio
 import logging
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.event import async_track_time_change
+from homeassistant.helpers.event import async_track_time_change, async_track_time_interval
 from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
@@ -36,6 +37,16 @@ def _jest_nowa(date_str: str) -> bool:
         except ValueError:
             continue
     return False
+
+
+def _czysty(text: Any) -> str:
+    """Zbij biale znaki (Librus zostawia znaki nowej linii i wielokrotne spacje)."""
+    return " ".join(str(text or "").split())
+
+
+def _wiadomosc_id(msg: Dict[str, Any]) -> Any:
+    """ID wiadomosci: href; gdy brak (np. wiadomosc systemowa) - nadawca+temat+data."""
+    return msg.get("href") or (msg.get("author", ""), msg.get("title", ""), msg.get("date", ""))
 
 
 def _dzis() -> date:
@@ -134,6 +145,18 @@ def _build_srednie_librus(avg: Any) -> Dict[str, Dict[str, Optional[float]]]:
 # Wylacz (False), jesli nie chcesz dodatkowych zapytan do Librusa.
 POBIERAJ_TRESC_ZADAN = True
 MAX_SZCZEGOLOW_NA_ODSWIEZENIE = 10
+
+# Jak czesto sprawdzac TYLKO nowe wiadomosci (1 zapytanie do Librusa), niezaleznie od
+# SCAN_INTERVAL (2 h) dla reszty danych. Ustaw None, zeby wylaczyc szybkie sprawdzanie.
+WIADOMOSCI_INTERWAL = timedelta(minutes=3)
+
+# Warstwa srodkowa: oceny, frekwencja (nb), zadania, terminarz, ogloszenia - to one wywoluja
+# powiadomienia. Kilka zapytan na cykl. None = tylko pelne odswiezenie (SCAN_INTERVAL).
+ZDARZENIA_INTERWAL = timedelta(minutes=15)
+
+# Plan lekcji (2 zapytania na cykl) - np. timedelta(minutes=60), jesli zalezy Ci na szybkich
+# zastepstwach. None = tylko pelne odswiezenie (SCAN_INTERVAL, 2 h).
+PLAN_INTERWAL = None
 
 # Stan czujnikow sredniej: True = srednia wazona (jak w Librusie), False = arytmetyczna.
 # Obie wartosci sa zawsze dostepne w atrybutach.
@@ -335,10 +358,12 @@ def _build_ogloszenia(raw: Any) -> List[Dict[str, Any]]:
     wynik = []
     for a in raw or []:
         data = (a.date or "").strip()
+        d = _parse_date(data)
         wynik.append({
             "tytul": (a.title or "").strip(),
             "autor": (a.author or "").strip(),
             "data": data,
+            "data_iso": d.isoformat() if d else "",
             "tresc": (a.description or "").strip(),
             "jest_nowe": _jest_nowa(data),
         })
@@ -457,6 +482,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._seen_homework_ids: set = set()
         self._seen_schedule_ids: set = set()
         self._seen_attendance_ids: set = set()
+        self._api_lock = asyncio.Lock()
         self._seen_announcement_ids: set = set()
         self._homework_details: Dict[str, Dict[str, str]] = {}
         self._first_run: bool = True
@@ -469,6 +495,122 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         )
 
     async def _async_update_data(self) -> Dict[str, Any]:
+        """Pobierz aktualne dane z API Librus (pelne odswiezenie, wylacznie z szybkim sprawdzaniem)."""
+        async with self._api_lock:
+            return await self._pobierz_dane()
+
+    def async_uruchom_odswiezanie(self, config_entry: ConfigEntry) -> None:
+        """Uruchom warstwowe odswiezanie: wiadomosci, zdarzenia (oceny itd.) i opcjonalnie plan.
+
+        Pelne odswiezenie (wszystko) robi sam koordynator co SCAN_INTERVAL.
+        """
+        for interwal, akcja in (
+            (WIADOMOSCI_INTERWAL, self._szybkie_wiadomosci),
+            (ZDARZENIA_INTERWAL, self._odswiez_zdarzenia),
+            (PLAN_INTERWAL, self._odswiez_plan),
+        ):
+            if interwal is not None:
+                config_entry.async_on_unload(
+                    async_track_time_interval(self.hass, akcja, interwal)
+                )
+
+    @staticmethod
+    def _grupuj_oceny(grades: List[Dict]) -> Dict[str, List[Dict]]:
+        """Grupuj oceny wg przedmiotu i oznacz nowe."""
+        wynik: Dict[str, List[Dict]] = {}
+        for grade in grades:
+            wynik.setdefault(grade["subject"], []).append({
+                "ocena": grade["grade"],
+                "data": grade["date"],
+                "kategoria": grade["category"],
+                "nauczyciel": grade["teacher"],
+                "semestr": grade.get("semester"),
+                "waga": grade.get("weight"),
+                "liczy_sie": grade.get("counts", True),
+                "komentarz": _komentarz_oceny(grade.get("desc", "")),
+                "jest_nowa": _jest_nowa(grade["date"]),
+            })
+        return wynik
+
+    def _zastosuj_czesciowe(self, nowe: Dict[str, Any]) -> None:
+        """Zapisz dane z odswiezenia czesciowego (bez async_set_updated_data - ono przesuwa timer)."""
+        if nowe != self.data:
+            self.data = nowe
+            self.async_update_listeners()
+
+    async def _odswiez_zdarzenia(self, _now: Optional[datetime] = None) -> None:
+        """Warstwa srodkowa: oceny, frekwencja, zadania, terminarz, ogloszenia + zdarzenia HA."""
+        if self.data is None or self._first_run or self._api_lock.locked():
+            return
+        try:
+            async with self._api_lock:
+                grades_raw = await self.client.async_get_grades()
+                attendance_raw = await self.client.async_get_attendance()
+                homework_raw = await self.client.async_get_homework()
+                schedule_raw = await self.client.async_get_schedule()
+                ogloszenia_raw = await self.client.async_get_announcements()
+
+                nowe = dict(self.data)
+                grades = grades_raw["oceny"] if grades_raw else None
+                if grades is not None:
+                    nowe["oceny"] = grades
+                    nowe["oceny_wg_przedmiotu"] = self._grupuj_oceny(grades)
+                    nowe["srednie_librus"] = _build_srednie_librus(grades_raw["srednie_librus"])
+                if attendance_raw is not None:
+                    nowe["obecnosc"] = _build_obecnosc(attendance_raw)
+                if homework_raw is not None:
+                    nowe["zadania"] = self._build_zadania(homework_raw)
+                    await self._dodaj_szczegoly_zadan(nowe)
+                if schedule_raw is not None:
+                    nowe["terminarz"] = schedule_raw
+                if ogloszenia_raw is not None:
+                    nowe["ogloszenia"] = _build_ogloszenia(ogloszenia_raw)
+
+            if grades is not None:
+                self._fire_events([], grades)
+            if homework_raw is not None:
+                self._fire_homework_events(nowe["zadania"])
+            if schedule_raw is not None:
+                self._fire_schedule_events(nowe["terminarz"])
+            if attendance_raw is not None:
+                self._fire_attendance_events(nowe["obecnosc"])
+            if ogloszenia_raw is not None:
+                self._fire_ogloszenia_events(nowe["ogloszenia"])
+            self._zastosuj_czesciowe(nowe)
+        except Exception as err:  # nigdy nie psuj reszty integracji
+            _LOGGER.warning("Odswiezanie zdarzen (oceny, zadania itd.) nie powiodlo sie: %s", err)
+
+    async def _odswiez_plan(self, _now: Optional[datetime] = None) -> None:
+        """Tylko plan lekcji (2 zapytania)."""
+        if self.data is None or self._first_run or self._api_lock.locked():
+            return
+        try:
+            async with self._api_lock:
+                plan_raw = await self.client.async_get_timetable()
+            if plan_raw is not None:
+                self._zastosuj_czesciowe({**self.data, "plan": _build_plan(plan_raw)})
+        except Exception as err:
+            _LOGGER.warning("Odswiezanie planu lekcji nie powiodlo sie: %s", err)
+
+    async def _szybkie_wiadomosci(self, _now: Optional[datetime] = None) -> None:
+        """Pobierz same wiadomosci, wyslij zdarzenia dla nowych i odswiez czujnik."""
+        if self.data is None or self._first_run or self._api_lock.locked():
+            return  # brak danych bazowych albo trwa pelne odswiezenie
+        try:
+            async with self._api_lock:
+                messages = await self.client.async_get_messages(count=10)
+            if messages is None:
+                return
+            wiadomosci = self._build_wiadomosci(messages)
+            self._fire_events(wiadomosci, [])
+            if wiadomosci != self.data.get("wiadomosci"):
+                # Bez async_set_updated_data: ono przesuwa termin pelnego odswiezenia.
+                self.data = {**self.data, "wiadomosci": wiadomosci}
+                self.async_update_listeners()
+        except Exception as err:  # szybkie sprawdzanie nigdy nie moze psuc reszty integracji
+            _LOGGER.warning("Szybkie sprawdzanie wiadomosci nie powiodlo sie: %s", err)
+
+    async def _pobierz_dane(self) -> Dict[str, Any]:
         """Pobierz aktualne dane z API Librus."""
         current_sem = _biezacy_semestr(_dzis())
 
@@ -549,22 +691,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 return result
 
             # Grupuj oceny wg przedmiotu i oznacz nowe
-            oceny_wg_przedmiotu: Dict[str, List[Dict]] = {}
-            for grade in grades:
-                subject = grade["subject"]
-                if subject not in oceny_wg_przedmiotu:
-                    oceny_wg_przedmiotu[subject] = []
-                oceny_wg_przedmiotu[subject].append({
-                    "ocena": grade["grade"],
-                    "data": grade["date"],
-                    "kategoria": grade["category"],
-                    "nauczyciel": grade["teacher"],
-                    "semestr": grade.get("semester"),
-                    "waga": grade.get("weight"),
-                    "liczy_sie": grade.get("counts", True),
-                    "komentarz": _komentarz_oceny(grade.get("desc", "")),
-                    "jest_nowa": _jest_nowa(grade["date"]),
-                })
+            oceny_wg_przedmiotu = self._grupuj_oceny(grades)
 
             wiadomosci = self._build_wiadomosci(messages)
             zadania = self._build_zadania(homework_raw)
@@ -588,7 +715,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             if self._first_run:
                 self._first_run = False
                 for msg in wiadomosci:
-                    self._seen_message_hrefs.add(msg["href"])
+                    self._seen_message_hrefs.add(_wiadomosc_id(msg))
                 for grade in grades:
                     self._seen_grade_ids.add(_ocena_id(grade))
                 for zadanie in zadania:
@@ -650,9 +777,9 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
     def _fire_events(self, messages: List[Dict], grades: List[Dict]) -> None:
         """Wyslij zdarzenia HA dla nowych wiadomosci i ocen."""
         for msg in messages:
-            href = msg.get("href", "")
-            if href and href not in self._seen_message_hrefs:
-                self._seen_message_hrefs.add(href)
+            msg_id = _wiadomosc_id(msg)
+            if msg_id not in self._seen_message_hrefs:
+                self._seen_message_hrefs.add(msg_id)
                 _LOGGER.debug("Nowa wiadomosc: %s", msg.get("title"))
                 self.hass.bus.fire(
                     EVENT_NOWA_WIADOMOSC,
@@ -661,6 +788,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                         "temat": msg.get("title", ""),
                         "data": msg.get("date", ""),
                         "ma_zalacznik": msg.get("has_attachment", False),
+                        "nieprzeczytana": msg.get("unread", False),
                     },
                 )
 
