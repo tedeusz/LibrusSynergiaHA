@@ -1,6 +1,7 @@
 # Dashboard "Oceny" dla integracji Librus APIX (zastępuje stary widok z encjami i tabelką HTML).
-# Wklej: Ustawienia > Pulpity > (pulpit) > Edytuj > ⋮ > Edytor YAML - jako JEDEN element listy spod "views:".
-# Encje: sensor.librus_imie_nazwisko_oceny i sensor.librus_imie_nazwisko_szczesliwy_numerek (jeśli u Ciebie inne - zmień w szablonach).
+# Dwie zakładki: "Oceny" i "Uwagi i zachowanie". Wklej: Ustawienia > Pulpity > (pulpit) > Edytuj > ⋮ > Edytor YAML -
+# jako DWA elementy listy spod "views:" (albo tylko pierwszy, jeśli nie potrzebujesz uwag).
+# Encje: sensor.librus_imie_nazwisko_oceny, ..._szczesliwy_numerek, ..._uwagi i ..._zachowanie (jeśli u Ciebie inne - zmień w szablonach).
 # Plakietki: 🟢 5-6 · 🔵 4 · 🟡 3 · 🟠 2 · 🔴 1 · 💬 ocena opisowa. Trend: ↗ ostatnia ocena podniosła średnią, ↘ obniżyła, → bez zmian.
 title: Librus oceny
 views:
@@ -88,5 +89,110 @@ views:
                 tap_action:
                   action: perform-action
                   perform_action: librus_apix.przegladaj_oceny
+                  data:
+                    kierunek: poprzednia
+
+  - title: Uwagi i zachowanie
+    path: uwagi
+    icon: mdi:clipboard-alert-outline
+    type: panel
+    cards:
+      - type: vertical-stack
+        cards:
+          # --- Ocena zachowania ---
+          - type: markdown
+            title: 🎭 Zachowanie
+            content: |
+              {%- set z = 'sensor.librus_imie_nazwisko_zachowanie' -%}
+              {%- set okresy = {'okres_1': 'semestr 1', 'okres_2': 'semestr 2', 'roczna': 'roczna'} -%}
+              {%- if states(z) in ['unknown', 'unavailable'] -%}
+              Brak danych o zachowaniu.
+              {%- elif states(z) == 'brak' -%}
+              Ocena zachowania nie została jeszcze wystawiona.{% if state_attr(z, 'liczba_pozytywnych') or state_attr(z, 'liczba_negatywnych') %} · 🌟 pozytywne: **{{ state_attr(z, 'liczba_pozytywnych') }}** · ⚠️ negatywne: **{{ state_attr(z, 'liczba_negatywnych') }}**{% endif %}
+              {%- else -%}
+              ## {{ states(z) | capitalize }} <small>{{ okresy.get(state_attr(z, 'ocena_biezaca_okres'), '') }}{{ ' · propozycja' if state_attr(z, 'ocena_jest_propozycja') else '' }}</small>
+
+              | | |
+              |:--|:--|
+              | Semestr 1 | **{{ (state_attr(z, 'okres_1') or {}).ocena or '—' }}**{{ ' <small>(propozycja)</small>' if (state_attr(z, 'okres_1') or {}).propozycja else '' }} |
+              | Semestr 2 | **{{ (state_attr(z, 'okres_2') or {}).ocena or '—' }}**{{ ' <small>(propozycja)</small>' if (state_attr(z, 'okres_2') or {}).propozycja else '' }} |
+              | Roczna | **{{ (state_attr(z, 'roczna') or {}).ocena or '—' }}**{{ ' <small>(propozycja)</small>' if (state_attr(z, 'roczna') or {}).propozycja else '' }} |
+
+              🌟 pozytywne wpisy: **{{ state_attr(z, 'liczba_pozytywnych') }}** · ⚠️ negatywne: **{{ state_attr(z, 'liczba_negatywnych') }}**
+              {%- endif -%}
+
+          # --- Wpisy o zachowaniu (ostatnie 8) ---
+          - type: markdown
+            title: 📋 Wpisy o zachowaniu
+            content: |
+              {%- set wpisy = state_attr('sensor.librus_imie_nazwisko_zachowanie', 'wpisy') or [] -%}
+              {%- set ikony = {'pozytywne': '🟢', 'negatywne': '🔴', 'neutralne': '⚪'} -%}
+              {%- if not wpisy -%}
+              Brak wpisów o zachowaniu. 🎉
+              {%- else -%}
+              {%- for w in wpisy[:8] %}
+              - {{ ikony.get(w.rodzaj, '⚪') }} **{{ w.ocena }}** · {{ w.data }}{% if w.nauczyciel %} · {{ w.nauczyciel }}{% endif %}{{ ' 🆕' if w.jest_nowy else '' }}{% if w.komentarz %}<br>💬 {{ w.komentarz | replace('\r', ' ') | replace('\n', ' ') | truncate(200) }}{% endif %}
+              {%- endfor %}
+              {%- if wpisy | length > 8 %}
+
+              _…i {{ wpisy | length - 8 }} starszych_
+              {%- endif %}
+              {%- endif -%}
+
+          # --- Uwagi i pochwały (po 5 na ekran, przyciski poniżej) ---
+          - type: markdown
+            title: 📝 Uwagi i pochwały
+            content: |
+              {%- set u = 'sensor.librus_imie_nazwisko_uwagi' -%}
+              {%- set p = state_attr(u, 'przegladanie') or {} -%}
+              {%- set lista = p.uwagi or [] -%}
+              {%- set ikony = {'pozytywna': '🌟', 'negatywna': '⚠️', 'neutralna': '📝'} -%}
+              {%- if states(u) in ['unknown', 'unavailable'] -%}
+              Brak danych o uwagach.
+              {%- elif state_attr(u, 'dostepne') == false -%}
+              Moduł uwag nie jest dostępny dla tego konta w Librusie.
+              {%- else -%}
+              {%- if state_attr(u, 'nierozpoznany_uklad') %}
+              ⚠️ _Strona uwag w Librusie ma nieznany układ - lista może być nieaktualna (usługa `librus_apix.diagnostyka_ocen` zapisze jej HTML do analizy)._
+
+              {% endif -%}
+              {%- if not lista -%}
+              Brak uwag. 🎉
+              {%- else -%}
+              ⚠️ negatywne: **{{ state_attr(u, 'liczba_negatywnych') }}** · 🌟 pozytywne: **{{ state_attr(u, 'liczba_pozytywnych') }}**{% if state_attr(u, 'liczba_neutralnych') %} · 📝 inne: **{{ state_attr(u, 'liczba_neutralnych') }}**{% endif %}
+
+              _Wpisy {{ p.od }}–{{ p.do }} z {{ p.razem }}{{ ' (najnowsze)' if p.najnowsze else '' }}_
+              {%- for w in lista %}
+              - {{ ikony.get(w.znak, '📝') }} **{{ w.kategoria or w.rodzaj or 'Uwaga' }}** · {{ w.data }}{% if w.nauczyciel %} · {{ w.nauczyciel }}{% endif %}{{ ' 🆕' if w.jest_nowa else '' }}{% if w.tresc %}<br>{{ w.tresc | replace('\r', ' ') | replace('\n', ' ') | truncate(300) }}{% endif %}
+              {%- endfor %}
+              {%- endif -%}
+              {%- endif -%}
+          - type: horizontal-stack
+            cards:
+              - type: custom:mushroom-template-card
+                primary: Starsze
+                icon: mdi:chevron-left
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_uwagi
+                  data:
+                    kierunek: nastepna
+              - type: custom:mushroom-template-card
+                primary: Najnowsze
+                icon: mdi:page-first
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_uwagi
+                  data:
+                    kierunek: najnowsze
+              - type: custom:mushroom-template-card
+                primary: Nowsze
+                icon: mdi:chevron-right
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_uwagi
                   data:
                     kierunek: poprzednia

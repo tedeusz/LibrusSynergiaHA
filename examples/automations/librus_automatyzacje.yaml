@@ -185,7 +185,49 @@
           ttl: 0
           priority: high
 
-# 8) Przypomnienie wieczorem (18:00) o sprawdzianach i zadaniach domowych na JUTRO
+# 8) Nowa UWAGA lub POCHWAŁA (pole "znak": negatywna / pozytywna / neutralna)
+- id: librus_nowa_uwaga
+  alias: "Librus - nowa uwaga"
+  description: "Powiadomienie o nowej uwadze albo pochwale w dzienniku."
+  mode: queued
+  max: 5
+  triggers:
+    - trigger: event
+      event_type: librus_apix_nowa_uwaga
+  actions:
+    - action: notify.mobile_app_TWOJ_TELEFON
+      data:
+        title: >-
+          {{ {'pozytywna': '🌟 Pochwała', 'negatywna': '⚠️ Uwaga'}.get(trigger.event.data.znak, '📝 Wpis w uwagach') }}{% if trigger.event.data.kategoria %}: {{ trigger.event.data.kategoria }}{% endif %}
+        message: >-
+          {{ trigger.event.data.tresc | replace('\n', ' ') | truncate(300) }}
+          {%- if trigger.event.data.nauczyciel %} — {{ trigger.event.data.nauczyciel }}{% endif %}
+        data:
+          ttl: 0
+          priority: high
+
+# 9) Nowy WPIS O ZACHOWANIU (rodzaj: pozytywne / negatywne / neutralne)
+- id: librus_nowy_wpis_zachowania
+  alias: "Librus - nowy wpis o zachowaniu"
+  description: "Powiadomienie o nowym wpisie przy ocenie zachowania."
+  mode: queued
+  max: 5
+  triggers:
+    - trigger: event
+      event_type: librus_apix_nowy_wpis_zachowania
+  actions:
+    - action: notify.mobile_app_TWOJ_TELEFON
+      data:
+        title: >-
+          {{ {'pozytywne': '🟢', 'negatywne': '🔴'}.get(trigger.event.data.rodzaj, '⚪') }} Zachowanie: {{ trigger.event.data.ocena }}
+        message: >-
+          {{ (trigger.event.data.komentarz or 'Bez komentarza') | replace('\n', ' ') | truncate(300) }}
+          {%- if trigger.event.data.nauczyciel %} — {{ trigger.event.data.nauczyciel }}{% endif %}
+        data:
+          ttl: 0
+          priority: high
+
+# 10) Przypomnienie wieczorem (18:00) o sprawdzianach i zadaniach domowych na JUTRO
 # Wyzwalane z kalendarza "Terminarz i zadania": wydarzenia całodniowe zaczynają się o 00:00, offset -6h = 18:00 dzień wcześniej.
 - id: librus_przypomnienie_na_jutro
   alias: "Librus - przypomnienie o terminach na jutro"
@@ -206,7 +248,7 @@
           ttl: 0
           priority: high
 
-# 9) Nowa WIADOMOŚĆ - dane bierzemy ze ZDARZENIA (trigger.event.data), a nie z czujnika.
+# 11) Nowa WIADOMOŚĆ - dane bierzemy ze ZDARZENIA (trigger.event.data), a nie z czujnika.
 # Przykład z README integracji czyta czujnik, który w chwili zdarzenia ma jeszcze starą listę -> "nieznany".
 # Jeśli masz starą automatyzację o nowej wiadomości, usuń ją albo podmień na tę.
 - id: librus_nowa_wiadomosc

@@ -2,7 +2,7 @@
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/LukMaverick)
 
-Integracja Home Assistant z systemem Librus Synergia: oceny (także opisowe), wiadomości, plan lekcji, zadania domowe, terminarz, frekwencja, ogłoszenia i powiadomienia.
+Integracja Home Assistant z systemem Librus Synergia: oceny (także opisowe), wiadomości, plan lekcji, zadania domowe, terminarz, frekwencja, ogłoszenia, uwagi, zachowanie i powiadomienia.
 
 > **Fork.** To rozszerzona wersja projektu [LukMaverick/LibrusSynergiaHA](https://github.com/LukMaverick/LibrusSynergiaHA) (v1.1.5), zbudowanego na bibliotece [librus-apix](https://github.com/RustySnek/librus-apix). Zmiany obejmują wyłącznie integrację (`custom_components/librus_apix`). Szczegóły w sekcji [Co dodaje ten fork](#-co-dodaje-ten-fork).
 
@@ -15,7 +15,8 @@ Integracja Home Assistant z systemem Librus Synergia: oceny (także opisowe), wi
 - 📝 **Zadania domowe, terminarz i sprawdziany** - pogrupowane po dniach, ze stronicowaniem
 - ✅ **Frekwencja** - procent, liczniki nieobecności, spóźnień i zwolnień oraz lista wpisów ze stronicowaniem
 - 📢 **Ogłoszenia szkoły** i 📖 **tematy lekcji**
-- 🔔 **Zdarzenia HA** - nowa ocena, wiadomość, zadanie, zdarzenie w terminarzu, ogłoszenie i wpis frekwencji
+- 📝 **Uwagi i zachowanie** - uwagi i pochwały ze stronicowaniem, ocena zachowania (semestry i roczna) oraz wpisy pozytywne i negatywne
+- 🔔 **Zdarzenia HA** - nowa ocena, wiadomość, zadanie, zdarzenie w terminarzu, ogłoszenie, wpis frekwencji, uwaga i wpis o zachowaniu
 - 📅 **Kalendarz** HA z terminarzem i zadaniami domowymi
 
 ## 🚀 Sensory i encje
@@ -36,6 +37,8 @@ Nazwy encji zależą od nazwy ucznia, np. `sensor.librus_<imie_nazwisko>_oceny`.
 | `sensor.librus_..._frekwencja` | Frekwencja w procentach (ogółem i dla semestrów) |
 | `sensor.librus_..._nieobecnosci` | Liczniki nieobecności, spóźnień i zwolnień oraz lista wpisów |
 | `sensor.librus_..._ogloszenia` | Ogłoszenia szkoły |
+| `sensor.librus_..._uwagi` | Uwagi i pochwały (liczba wpisów; atrybuty: liczniki wg rodzaju, ostatnia, lista, ekran przeglądania) |
+| `sensor.librus_..._zachowanie` | Ocena zachowania (roczna, a gdy jej nie ma - z semestru) oraz wpisy pozytywne i negatywne |
 | `sensor.librus_..._tematy_lekcji` | Tematy zrealizowanych lekcji z ostatnich dni |
 | `sensor.librus_..._szczesliwy_numerek`, `..._informacje_o_uczniu` | Szczęśliwy numerek i dane ucznia |
 | `binary_sensor.librus_..._lekcja_trwa`, `..._lekcje_dzis` | Czy trwa lekcja, czy dziś są lekcje |
@@ -48,10 +51,10 @@ Sensory średnich mają `state_class: measurement` — HA automatycznie rysuje d
 - **Oceny opisowe [OO]** (klasy I–III). Strona Librusa wypełnia je skryptem przez API, więc biblioteka ich nie widzi. Integracja pobiera je z API Synergii i pokazuje jako ocenę „OO” z obszarem, wymaganiami, opisem i nauczycielem. Jeśli API chwilowo nie odpowie, zostają ostatnie znane oceny (w logu pojawia się ostrzeżenie z kodami odpowiedzi).
 - **Własny parser strony ocen** uzupełniający wyniki biblioteki, gdy ta pominie część ocen.
 - **Warstwowe odświeżanie** zamiast jednego rzadkiego cyklu (patrz niżej).
-- **Nowe sensory, kalendarz i sensory binarne**: plan lekcji, zadania domowe, frekwencja, ogłoszenia, tematy lekcji, aktualna lekcja.
+- **Nowe sensory, kalendarz i sensory binarne**: plan lekcji, zadania domowe, frekwencja, ogłoszenia, tematy lekcji, aktualna lekcja, uwagi i zachowanie.
 - **Przeglądanie list usługami** (bez dodatkowych zapytań do Librusa) do budowy dashboardów ze stronicowaniem.
 - **Treść wiadomości na żądanie**, zapamiętywana w `Store`, bez oznaczania starych wiadomości jako przeczytanych.
-- **Zdarzenia HA** dla nowych ocen, wiadomości, zadań, terminarza, ogłoszeń i wpisów frekwencji.
+- **Zdarzenia HA** dla nowych ocen, wiadomości, zadań, terminarza, ogłoszeń, wpisów frekwencji, uwag i wpisów o zachowaniu.
 - **Usługa diagnostyczna** `librus_apix.diagnostyka_ocen`.
 
 ### Odświeżanie danych
@@ -59,7 +62,7 @@ Sensory średnich mają `state_class: measurement` — HA automatycznie rysuje d
 | Co | Jak często |
 |----|-----------|
 | Wiadomości (szybkie sprawdzanie nowych) | co 3 minuty |
-| Oceny, zadania, terminarz, frekwencja, ogłoszenia + zdarzenia | co 15 minut |
+| Oceny (razem z zachowaniem), zadania, terminarz, frekwencja, ogłoszenia, uwagi + zdarzenia | co 15 minut |
 | Pełne odświeżenie wszystkiego (m.in. plan, tematy lekcji, średnie Librusa) | co 2 godziny |
 
 Wartości można zmienić w stałych na początku `coordinator.py` (`WIADOMOSCI_INTERWAL`, `ZDARZENIA_INTERWAL`, `PLAN_INTERWAL`) oraz `SCAN_INTERVAL` w `const.py`.
@@ -77,12 +80,13 @@ Usługi przesuwają ekran listy (atrybut `przegladanie` odpowiedniego sensora) i
 | `librus_apix.przegladaj_zadania` | Kolejne dni z zadaniami domowymi |
 | `librus_apix.przegladaj_oceny` | Lista ostatnich ocen |
 | `librus_apix.przegladaj_frekwencje` | Lista nieobecności, spóźnień i zwolnień |
+| `librus_apix.przegladaj_uwagi` | Lista uwag i pochwał |
 | `librus_apix.przegladaj_plan` | Tydzień planu lekcji: `kierunek` = `poprzedni`, `biezacy`, `nastepny` |
 | `librus_apix.diagnostyka_ocen` | Zapisuje raport diagnostyczny ocen w katalogu konfiguracji HA |
 
 ### Diagnostyka ocen
 
-Jeśli brakuje ocen, uruchom `librus_apix.diagnostyka_ocen` (Narzędzia deweloperskie → Usługi). Zapisze w katalogu konfiguracji plik `librus_apix_diagnostyka_ocen.txt` (oraz `librus_apix_strona_ocen.html`). Przed wysłaniem raportu komukolwiek **usuń z niego dane osobowe** (imię i nazwisko ucznia, nauczycieli, identyfikatory).
+Jeśli brakuje ocen, uruchom `librus_apix.diagnostyka_ocen` (Narzędzia deweloperskie → Usługi). Zapisze w katalogu konfiguracji plik `librus_apix_diagnostyka_ocen.txt` (oraz `librus_apix_strona_ocen.html` i, jeśli pobrano uwagi, `librus_apix_strona_uwag.html`). Przed wysłaniem raportu komukolwiek **usuń z niego dane osobowe** (imię i nazwisko ucznia, nauczycieli, identyfikatory).
 
 ## 📦 Instalacja
 
@@ -292,14 +296,14 @@ W katalogu [`examples/`](examples) są gotowe pulpity i automatyzacje używając
 | Plik | Zawartość |
 |------|-----------|
 | `examples/dashboards/librus_widok_glowny.yaml` | Widok główny z kafelkami przechodzącymi do pozostałych pulpitów |
-| `examples/dashboards/oceny_dashboard.yaml` | Oceny wg przedmiotów i lista ostatnich ocen ze stronicowaniem |
+| `examples/dashboards/oceny_dashboard.yaml` | Dwie zakładki: oceny wg przedmiotów i lista ostatnich ocen ze stronicowaniem oraz uwagi i zachowanie |
 | `examples/dashboards/plan_lekcji_dashboard.yaml` | Plan tygodnia ze stronicowaniem, aktualna lekcja i tematy lekcji |
 | `examples/dashboards/zadania_dashboard.yaml` | Zadania domowe po dniach ze stronicowaniem |
 | `examples/dashboards/terminarz_dashboard.yaml`, `sprawdziany_dashboard.yaml` | Terminarz i sprawdziany ze stronicowaniem |
 | `examples/dashboards/wiadomosci_dashboard.yaml` | Wiadomości ze stronicowaniem i podglądem treści |
 | `examples/dashboards/librus_szkola_dashboard.yaml` | Ogłoszenia szkoły ze stronicowaniem |
 | `examples/dashboards/frekwencja_dashboard.yaml` | Frekwencja, liczniki i lista wpisów ze stronicowaniem |
-| `examples/automations/librus_automatyzacje.yaml` | Powiadomienia: nowe zadanie, nieobecność, ocena, ogłoszenie, wiadomość, koniec lekcji, przypomnienie o terminach |
+| `examples/automations/librus_automatyzacje.yaml` | Powiadomienia: nowe zadanie, nieobecność, ocena, ogłoszenie, uwaga, wpis o zachowaniu, wiadomość, koniec lekcji, przypomnienie o terminach |
 
 Przyciski przeglądania w pulpitach używają kart [Mushroom](https://github.com/piitaya/lovelace-mushroom) (instalacja przez HACS). Wklejanie pulpitu: Ustawienia → Pulpity → (pulpit) → Edytuj → ⋮ → Edytor YAML.
 
@@ -368,6 +372,14 @@ automation:
 | `librus_apix_nowe_zdarzenie` | `data`, `tytul`, `przedmiot`, `godzina` |
 | `librus_apix_nowe_ogloszenie` | `tytul`, `autor`, `data`, `tresc` |
 | `librus_apix_nowa_nieobecnosc` | `data`, `symbol`, `typ`, `przedmiot`, `godzina_lekcyjna`, `nauczyciel` |
+| `librus_apix_nowa_uwaga` | `data`, `nauczyciel`, `rodzaj`, `znak` (`pozytywna` / `negatywna` / `neutralna`), `kategoria`, `tresc` |
+| `librus_apix_nowy_wpis_zachowania` | `okres`, `ocena`, `rodzaj` (`pozytywne` / `negatywne` / `neutralne`), `data`, `nauczyciel`, `komentarz` |
+
+### Uwagi i zachowanie
+
+- **Zachowanie** jest czytane z tej samej strony ocen, więc nie kosztuje dodatkowego zapytania. Ocena śródroczna jest „propozycją”, dopóki etykieta w Librusie mówi o ocenie przewidywanej.
+- **Uwagi** to osobna strona Librusa (jedno lekkie zapytanie co 15 minut). Jeśli konto nie ma modułu Uwagi, integracja stwierdza to jednym zapytaniem kontrolnym i pomija go przez 24 godziny, zamiast logować się ponownie co cykl (atrybut `dostepne` = `false`).
+- Gdy strona uwag ma nieznany układ (nic nie odczytano i brak napisu „Brak uwag”), lista nie jest kasowana, atrybut `nierozpoznany_uklad` = `true`, a usługa `librus_apix.diagnostyka_ocen` zapisze jej HTML do analizy.
 
 ## 🛠️ Rozwój
 
@@ -432,6 +444,8 @@ Pull requesty i zgłoszenia są mile widziane. Pamiętaj, żeby w opisach i loga
 ### 🙏 Podziękowania
 
 Specjalne podziękowania dla **KB** za wsparcie i pomoc w rozwoju projektu.
+
+Podejście do rozpoznawania układu strony uwag i wiersza zachowania podejrzano w forkach [mchuc](https://github.com/mchuc/LibrusSynergiaHA) i [TomaszSyc](https://github.com/TomaszSyc/LibrusSynergiaHA) (kod napisany od nowa).
 
 ## 👨‍💻 Autor
 
