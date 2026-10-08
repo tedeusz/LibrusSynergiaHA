@@ -16,6 +16,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 COTYGODNIOWO = "co_tydzien"
 JEDNORAZOWO = "jednorazowo"
+CO_2_TYGODNIE = "co_2_tygodnie"  # od podanej daty pierwszych zajec, co 14 dni
+POWTARZANIA = (COTYGODNIOWO, CO_2_TYGODNIE, JEDNORAZOWO)
 DNI_TYGODNIA = ["poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota", "niedziela"]
 DNI_SKROT = ["pon", "wt", "śr", "czw", "pt", "sob", "niedz"]
 # Numer lekcji dodatkowej w planie: nie ma numeru szkolnego, wiec zawsze "+"
@@ -78,7 +80,7 @@ def nowa_lekcja(
     poczatek, koniec = _hhmm(od), _hhmm(do)
     if minuty(koniec) <= minuty(poczatek):
         raise ValueError("Godzina zakończenia musi być późniejsza niż rozpoczęcia")
-    if powtarzanie not in (COTYGODNIOWO, JEDNORAZOWO):
+    if powtarzanie not in POWTARZANIA:
         raise ValueError(f"Nieznany sposób powtarzania: {powtarzanie!r}")
     rekord: Dict[str, Any] = {
         "id": id or uuid.uuid4().hex[:8],
@@ -94,6 +96,12 @@ def nowa_lekcja(
         if not iso:
             raise ValueError("Dla zajęć jednorazowych podaj datę")
         rekord["data"] = iso
+    elif powtarzanie == CO_2_TYGODNIE:
+        iso = data_iso(data)
+        if not iso:
+            raise ValueError("Dla zajęć co 2 tygodnie podaj datę pierwszych zajęć")
+        rekord["data"] = iso  # pierwszy termin; kolejne co 14 dni
+        rekord["dzien"] = date.fromisoformat(iso).weekday()
     else:
         if isinstance(dzien, str) and dzien.strip().lower() in DNI_TYGODNIA:
             dzien = DNI_TYGODNIA.index(dzien.strip().lower())
@@ -109,6 +117,9 @@ def nowa_lekcja(
 
 def opis_terminu(l: Dict[str, Any]) -> str:
     """"śr 16:00–17:00" albo "2026-10-15 16:00–17:00" - do list i etykiet."""
+    if l["powtarzanie"] == CO_2_TYGODNIE:
+        poczatek = date.fromisoformat(l["data"])
+        return f"co 2 tyg. {DNI_SKROT[l['dzien']]} {l['od']}–{l['do']} (od {poczatek:%d.%m})"
     kiedy = l["data"] if l["powtarzanie"] == JEDNORAZOWO else DNI_SKROT[l["dzien"]]
     return f"{kiedy} {l['od']}–{l['do']}"
 
@@ -130,6 +141,8 @@ def pasuje(l: Dict[str, Any], dzien: date) -> bool:
     """Czy zajecia odbywaja sie danego dnia (z uwzglednieniem odwolanych terminow - te tez "pasuja")."""
     if l["powtarzanie"] == JEDNORAZOWO:
         return l["data"] == dzien.isoformat()
+    if l["powtarzanie"] == CO_2_TYGODNIE:
+        return dzien >= date.fromisoformat(l["data"]) and (dzien - date.fromisoformat(l["data"])).days % 14 == 0
     return l["dzien"] == dzien.weekday()
 
 

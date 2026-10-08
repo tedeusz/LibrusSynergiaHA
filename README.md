@@ -87,7 +87,7 @@ Usługi przesuwają ekran listy (atrybut `przegladanie` odpowiedniego sensora) i
 | `librus_apix.przegladaj_frekwencje` | Lista nieobecności, spóźnień i zwolnień |
 | `librus_apix.przegladaj_uwagi` | Lista uwag i pochwał |
 | `librus_apix.przegladaj_plan` | Tydzień planu lekcji: `kierunek` = `poprzedni`, `biezacy`, `nastepny` |
-| `librus_apix.dodaj_lekcje_dodatkowa` | Dopisuje zajęcia do planu: `przedmiot`, `od`, `do`, `powtarzanie` (`co_tydzien` / `jednorazowo`), `dzien` (0 = poniedziałek … 6) albo `data`, opcjonalnie `miejsce` |
+| `librus_apix.dodaj_lekcje_dodatkowa` | Dopisuje zajęcia do planu: `przedmiot`, `od`, `do`, `powtarzanie` (`co_tydzien` / `co_2_tygodnie` / `jednorazowo`), `dzien` (0 = poniedziałek … 6; dla `co_tydzien`) albo `data` (dla `jednorazowo` i `co_2_tygodnie` – data pierwszych zajęć), opcjonalnie `miejsce` |
 | `librus_apix.edytuj_lekcje_dodatkowa` | Zmienia wybrane pola zajęć (`id` + dowolne z: `przedmiot`, `od`, `do`, `powtarzanie`, `dzien`, `data`, `miejsce`); pominięte zostają bez zmian |
 | `librus_apix.odwolaj_termin_lekcji_dodatkowej` / `librus_apix.przywroc_termin_lekcji_dodatkowej` | Odwołuje (przywraca) zajęcia tylko w jednym dniu: `id` + `data` |
 | `librus_apix.usun_lekcje_dodatkowa` | Usuwa zajęcia po `id` (z atrybutu `lekcje` sensora `..._lekcje_dodatkowe`) |
@@ -392,8 +392,9 @@ automation:
 
 ### Zajęcia dodatkowe
 
-Zajęcia spoza planu Librusa dodajesz w UI, bez edycji YAML-a: wpisz nazwę (i opcjonalnie miejsce), wybierz `co tydzień` + dzień tygodnia albo `jednorazowo` + datę, ustaw godziny i naciśnij przycisk `..._lekcja_dodatkowa_dodaj`. Ten sam efekt daje usługa `librus_apix.dodaj_lekcje_dodatkowa`. Gotowy formularz (dodawanie, edycja, usuwanie) jest w drugiej zakładce `plan_lekcji_dashboard.yaml`, a lista terminów do odwołania na dole pierwszej.
+Zajęcia spoza planu Librusa dodajesz w UI, bez edycji YAML-a: wpisz nazwę (i opcjonalnie miejsce), wybierz `co tydzień` + dzień tygodnia, `co 2 tygodnie` + datę pierwszych zajęć albo `jednorazowo` + datę, ustaw godziny i naciśnij przycisk `..._lekcja_dodatkowa_dodaj`. Ten sam efekt daje usługa `librus_apix.dodaj_lekcje_dodatkowa`. Gotowy formularz (dodawanie, edycja, usuwanie) jest w drugiej zakładce `plan_lekcji_dashboard.yaml`, a lista terminów do odwołania na dole pierwszej.
 
+- **Zajęcia co 2 tygodnie**: podaj datę pierwszych zajęć – powtarzają się co 14 dni od tej daty (dzień tygodnia wynika z daty, wcześniej niż od niej zajęć nie ma). Odwoływanie pojedynczych terminów działa tak samo jak przy zajęciach co tydzień.
 - Zajęcia są zapisane w `Store` Home Assistanta (przeżywają restart i aktualizację), osobno dla każdego konta. Jednorazowe zajęcia starsze niż 30 dni są usuwane przy starcie.
 - Plan, który widzą czujniki (`..._plan_lekcji_dzis`, `..._nastepny_dzien`, `..._tydzien`, `..._aktualna_lekcja`), kalendarz oraz znaczniki `..._poczatek_lekcji_*` i `..._koniec_lekcji_dzis`, to **suma planu z Librusa i zajęć dodatkowych** posortowana wg godziny rozpoczęcia. Dlatego automatyzacja „koniec ostatniej lekcji” uwzględnia je bez żadnych zmian w wyzwalaczu.
 - Zajęcia dodatkowe mają `numer` równy `+` i atrybut `dodatkowa: true` (w kalendarzu mają przedrostek ➕). Jeśli Librus chwilowo nie zwróci planu, plan składa się z samych zajęć dodatkowych, a po następnym udanym pobraniu wraca pełny.

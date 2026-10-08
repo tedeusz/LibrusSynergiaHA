@@ -650,7 +650,7 @@ class LibrusLekcjeDodatkoweSensor(_LibrusSensor):
                     "przedmiot": l["przedmiot"],
                     "powtarzanie": l["powtarzanie"],
                     "termin": LD.opis_terminu(l),
-                    "dzien": LD.DNI_TYGODNIA[l["dzien"]] if l["powtarzanie"] == LD.COTYGODNIOWO else None,
+                    "dzien": LD.DNI_TYGODNIA[l["dzien"]] if l["powtarzanie"] != LD.JEDNORAZOWO else None,
                     "data": l.get("data"),
                     "od": l["od"],
                     "do": l["do"],

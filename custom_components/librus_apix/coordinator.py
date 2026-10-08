@@ -1008,8 +1008,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             "przedmiot": l["przedmiot"],
             "miejsce": l.get("miejsce", ""),
             "powtarzanie": l["powtarzanie"],
-            "dzien": l["dzien"] if l["powtarzanie"] == LD.COTYGODNIOWO else FORMULARZ_DOMYSLNY["dzien"],
-            "data": date.fromisoformat(l["data"]) if l["powtarzanie"] == LD.JEDNORAZOWO else None,
+            "dzien": l["dzien"] if l["powtarzanie"] != LD.JEDNORAZOWO else FORMULARZ_DOMYSLNY["dzien"],
+            "data": date.fromisoformat(l["data"]) if l["powtarzanie"] != LD.COTYGODNIOWO else None,
             "od": l["od"],
             "do": l["do"],
         }
@@ -1035,11 +1035,11 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         if not self.edytowana:
             raise ValueError("Najpierw wybierz zajęcia do edycji")
         f = self.formularz
-        # przy zajeciach cotygodniowych data z formularza jest bez znaczenia (i odwrotnie dzien)
+        # przy zajeciach cotygodniowych data z formularza jest bez znaczenia; przy pozostalych dzien wynika z daty
         rekord = await self.async_edytuj_lekcje_dodatkowa(
             self.edytowana, przedmiot=f["przedmiot"], od=f["od"], do=f["do"], powtarzanie=f["powtarzanie"],
             dzien=f["dzien"] if f["powtarzanie"] == LD.COTYGODNIOWO else None,
-            data=f["data"] if f["powtarzanie"] == LD.JEDNORAZOWO else None,
+            data=f["data"] if f["powtarzanie"] != LD.COTYGODNIOWO else None,
             miejsce=f["miejsce"] or "",
         )
         self.wyczysc_formularz()

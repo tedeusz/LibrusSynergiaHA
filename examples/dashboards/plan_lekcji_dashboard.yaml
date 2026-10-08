@@ -193,10 +193,10 @@ views:
             conditions:
               - condition: state
                 entity: select.librus_imie_nazwisko_lekcja_dodatkowa_powtarzanie
-                state: jednorazowo
+                state_not: co tydzień
             row:
               entity: date.librus_imie_nazwisko_lekcja_dodatkowa_data
-              name: Data
+              name: Data (przy „co 2 tygodnie” - pierwszy termin)
           - entity: time.librus_imie_nazwisko_lekcja_dodatkowa_od
             name: Od godziny
           - entity: time.librus_imie_nazwisko_lekcja_dodatkowa_do

@@ -1159,7 +1159,7 @@ def _koordynator_uslugi(hass: HomeAssistant, call):
 def _zarejestruj_uslugi_lekcji_dodatkowych(hass: HomeAssistant) -> None:
     """Uslugi lekcji dodatkowych: dodawanie, edycja, odwolywanie terminu i usuwanie (te same, ktorych uzywaja przyciski)."""
     from homeassistant.exceptions import ServiceValidationError
-    from .lekcje_dodatkowe import COTYGODNIOWO, JEDNORAZOWO
+    from .lekcje_dodatkowe import POWTARZANIA
 
     async def _dodaj(call) -> None:
         coordinator = _koordynator_uslugi(hass, call)
@@ -1193,7 +1193,7 @@ def _zarejestruj_uslugi_lekcji_dodatkowych(hass: HomeAssistant) -> None:
                     vol.Required("przedmiot"): cv.string,
                     vol.Required("od"): cv.time,
                     vol.Required("do"): cv.time,
-                    vol.Optional("powtarzanie", default=COTYGODNIOWO): vol.In([COTYGODNIOWO, JEDNORAZOWO]),
+                    vol.Optional("powtarzanie", default="co_tydzien"): vol.In(list(POWTARZANIA)),
                     vol.Optional("dzien"): vol.Any(vol.Coerce(int), cv.string),
                     vol.Optional("data"): cv.date,
                     vol.Optional("miejsce", default=""): cv.string,
@@ -1239,7 +1239,7 @@ def _zarejestruj_uslugi_lekcji_dodatkowych(hass: HomeAssistant) -> None:
                     vol.Optional("przedmiot"): cv.string,
                     vol.Optional("od"): cv.time,
                     vol.Optional("do"): cv.time,
-                    vol.Optional("powtarzanie"): vol.In([COTYGODNIOWO, JEDNORAZOWO]),
+                    vol.Optional("powtarzanie"): vol.In(list(POWTARZANIA)),
                     vol.Optional("dzien"): vol.Any(vol.Coerce(int), cv.string),
                     vol.Optional("data"): cv.date,
                     vol.Optional("miejsce"): cv.string,

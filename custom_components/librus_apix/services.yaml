@@ -227,6 +227,7 @@ dodaj_lekcje_dodatkowa:
         select:
           options:
             - co_tydzien
+            - co_2_tygodnie
             - jednorazowo
     dzien:
       name: Dzień tygodnia (dla zajęć cotygodniowych)
@@ -243,7 +244,7 @@ dodaj_lekcje_dodatkowa:
             - sobota
             - niedziela
     data:
-      name: Data (dla zajęć jednorazowych)
+      name: Data (dla zajęć jednorazowych albo pierwszych zajęć co 2 tygodnie)
       required: false
       selector:
         date:
@@ -291,6 +292,7 @@ edytuj_lekcje_dodatkowa:
         select:
           options:
             - co_tydzien
+            - co_2_tygodnie
             - jednorazowo
     dzien:
       name: Dzień tygodnia (dla zajęć cotygodniowych)
@@ -306,7 +308,7 @@ edytuj_lekcje_dodatkowa:
             - sobota
             - niedziela
     data:
-      name: Data (dla zajęć jednorazowych)
+      name: Data (dla zajęć jednorazowych albo pierwszych zajęć co 2 tygodnie)
       required: false
       selector:
         date:

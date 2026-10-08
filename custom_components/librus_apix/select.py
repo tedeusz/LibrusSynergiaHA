@@ -9,9 +9,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import LibrusDataUpdateCoordinator, LibrusEntityMixin
-from .lekcje_dodatkowe import COTYGODNIOWO, DNI_TYGODNIA, JEDNORAZOWO, etykiety
+from .lekcje_dodatkowe import CO_2_TYGODNIE, COTYGODNIOWO, DNI_TYGODNIA, JEDNORAZOWO, etykiety
 
-POWTARZANIE = {COTYGODNIOWO: "co tydzień", JEDNORAZOWO: "jednorazowo"}
+POWTARZANIE = {COTYGODNIOWO: "co tydzień", CO_2_TYGODNIE: "co 2 tygodnie", JEDNORAZOWO: "jednorazowo"}
 # Pierwsza opcja list: stan "nic nie wybrano" (zamiast "unknown")
 NIC_NIE_WYBRANO = "— wybierz —"
 NOWE_ZAJECIA = "➕ nowe zajęcia"
