@@ -110,11 +110,14 @@ class LibrusPlanLekcjiCalendar(_LibrusCalendar):
                 if not start or not koniec:
                     continue
                 nazwa = _nazwa_lekcji(l)
+                dodatkowa = bool(l.get("dodatkowa"))
+                if dodatkowa:
+                    nazwa = f"➕ {nazwa}"
                 if l["odwolana"]:
                     nazwa = f"❌ {nazwa} (odwołana)"
                 elif l["zmiana"]:
                     nazwa = f"🔄 {nazwa} ({l['zmiana']})"
-                opis = [f"{l['numer']}. lekcja", l["nauczyciel_sala"]]
+                opis = ["Zajęcia dodatkowe" if dodatkowa else f"{l['numer']}. lekcja", l["nauczyciel_sala"]]
                 if l.get("zastepca"):
                     opis.append(f"Zastępstwo: {l['zastepca']}")
                 if l.get("sala_zastepcza"):
@@ -122,7 +125,7 @@ class LibrusPlanLekcjiCalendar(_LibrusCalendar):
                 wynik.append(CalendarEvent(
                     start=start, end=koniec, summary=nazwa,
                     description="\n".join(x for x in opis if x),
-                    uid=f"plan-{iso}-{l['numer']}",
+                    uid=f"plan-{iso}-{l['id_dodatkowej'] if dodatkowa else l['numer']}",
                 ))
         return wynik
 

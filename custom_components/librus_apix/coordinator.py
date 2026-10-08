@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import (
 )
 from homeassistant.util import dt as dt_util
 
+from . import lekcje_dodatkowe as LD
 from .const import DOMAIN, SCAN_INTERVAL
 from .uwagi import puste_zachowanie
 
@@ -759,6 +760,18 @@ EVENT_NOWA_UWAGA = f"{DOMAIN}_nowa_uwaga"
 EVENT_NOWY_WPIS_ZACHOWANIA = f"{DOMAIN}_nowy_wpis_zachowania"
 
 
+# Wartosci poczatkowe formularza "Lekcja dodatkowa" (encje text/select/time/date integracji)
+FORMULARZ_DOMYSLNY: Dict[str, Any] = {
+    "przedmiot": "",
+    "miejsce": "",
+    "powtarzanie": LD.COTYGODNIOWO,
+    "dzien": 0,  # 0 = poniedzialek
+    "data": None,  # dla zajec jednorazowych
+    "od": "15:00",
+    "do": "16:00",
+}
+
+
 class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
     """Klasa zarzadzajaca pobieraniem danych z Librus."""
 
@@ -789,7 +802,16 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._frek_przesuniecie = 0
         self._uwagi_przesuniecie = 0
         self._plan_tydzien = 0  # przesuniecie widoku planu w tygodniach (0 = biezacy tydzien szkolny)
-        self._plan_dodatkowy: Dict[str, List[Dict[str, Any]]] = {}  # dni spoza danych bazowych
+        self._plan_dodatkowy: Dict[str, List[Dict[str, Any]]] = {}  # dni spoza danych bazowych (tylko Librus)
+        # Lekcje dodatkowe dopisane recznie (trwale w Store) oraz formularz ich dodawania w UI
+        self._dodatkowe: List[Dict[str, Any]] = []
+        self.formularz: Dict[str, Any] = dict(FORMULARZ_DOMYSLNY)
+        self.do_usuniecia: Optional[str] = None  # id lekcji wybranej do usuniecia
+        self._dodatkowe_store: Optional[Store] = (
+            Store(hass, 1, f"{DOMAIN}_lekcje_dodatkowe_{config_entry.entry_id}")
+            if config_entry is not None
+            else None
+        )
         self._tresci_store: Optional[Store] = (
             Store(hass, 1, f"{DOMAIN}_wiadomosci_{config_entry.entry_id}")
             if config_entry is not None
@@ -865,16 +887,95 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         if zmiana:
             self._zapisz_tresci()
 
+    # --- Lekcje dodatkowe (recznie dopisywane do planu) ---------------------------
+
+    async def async_wczytaj_dodatkowe(self) -> None:
+        """Wczytaj zapisane lekcje dodatkowe (przezywaja restart HA)."""
+        if self._dodatkowe_store is None:
+            return
+        try:
+            zapisane = await self._dodatkowe_store.async_load()
+            self._dodatkowe = LD.usun_przedawnione(LD.z_zapisu(zapisane), _dzis())
+        except Exception as err:  # uszkodzony zapis nie moze blokowac startu integracji
+            _LOGGER.warning("Nie udalo sie wczytac lekcji dodatkowych: %s", err)
+
+    async def _zapisz_dodatkowe(self) -> None:
+        if self._dodatkowe_store is not None:
+            await self._dodatkowe_store.async_save(list(self._dodatkowe))
+
+    def lekcje_dodatkowe(self) -> List[Dict[str, Any]]:
+        return list(self._dodatkowe)
+
+    def _scal_plan(self, plan_librus: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
+        """Plan z Librusa + lekcje dodatkowe (to jest `data["plan"]`, z ktorego korzystaja wszystkie encje)."""
+        return LD.scal_plan(plan_librus, self._dodatkowe, _dzis())
+
+    def _przelicz_plan(self) -> None:
+        """Po zmianie listy lekcji dodatkowych: przelicz plan z danych Librusa (bez zapytan) i odswiez encje."""
+        baza = (self.data or {}).get("plan_librus")
+        if baza is not None:
+            self.data = {**self.data, "plan": self._scal_plan(baza)}
+        self.async_update_listeners()
+
+    async def async_dodaj_lekcje_dodatkowa(
+        self, przedmiot: str, od: Any, do: Any, *, powtarzanie: str = LD.COTYGODNIOWO,
+        dzien: Any = None, data: Any = None, miejsce: str = "",
+    ) -> Dict[str, Any]:
+        """Dodaj lekcje dodatkowa; ValueError z czytelnym komunikatem przy blednych danych."""
+        rekord = LD.nowa_lekcja(przedmiot, od, do, powtarzanie=powtarzanie, dzien=dzien, data=data, miejsce=miejsce)
+        klucz = lambda l: (l["przedmiot"].lower(), l["od"], l["do"], l["powtarzanie"], l.get("dzien"), l.get("data"))
+        if any(klucz(l) == klucz(rekord) for l in self._dodatkowe):
+            raise ValueError("Takie zajęcia są już dodane")
+        self._dodatkowe.append(rekord)
+        await self._zapisz_dodatkowe()
+        self._przelicz_plan()
+        return rekord
+
+    async def async_usun_lekcje_dodatkowa(self, id: str) -> bool:
+        """Usun lekcje dodatkowa po id; False, gdy takiej nie ma."""
+        pozostale = [l for l in self._dodatkowe if l["id"] != id]
+        if len(pozostale) == len(self._dodatkowe):
+            return False
+        self._dodatkowe = pozostale
+        if self.do_usuniecia == id:
+            self.do_usuniecia = None
+        await self._zapisz_dodatkowe()
+        self._przelicz_plan()
+        return True
+
+    def ustaw_formularz(self, pole: str, wartosc: Any) -> None:
+        self.formularz[pole] = wartosc
+        self.async_update_listeners()
+
+    async def async_dodaj_z_formularza(self) -> Dict[str, Any]:
+        """Dodaj lekcje z wartosci formularza (przycisk "Dodaj"); po sukcesie czysci nazwe i miejsce."""
+        f = self.formularz
+        rekord = await self.async_dodaj_lekcje_dodatkowa(
+            f["przedmiot"], f["od"], f["do"], powtarzanie=f["powtarzanie"],
+            dzien=f["dzien"], data=f["data"], miejsce=f["miejsce"],
+        )
+        self.formularz["przedmiot"] = ""
+        self.formularz["miejsce"] = ""
+        self.async_update_listeners()
+        return rekord
+
+    async def async_usun_wybrana(self) -> bool:
+        """Usun lekcje wybrana na liscie "do usuniecia" (przycisk "Usun")."""
+        if not self.do_usuniecia:
+            raise ValueError("Wybierz zajęcia do usunięcia")
+        return await self.async_usun_lekcje_dodatkowa(self.do_usuniecia)
+
     def widok_planu(self) -> Dict[str, Any]:
         """Plan wybranego tygodnia (pon-pt): z danych bazowych albo pobrany na zadanie."""
         poniedzialek = _poniedzialek_tygodnia_szkolnego(_dzis()) + timedelta(weeks=self._plan_tydzien)
         dni = [(poniedzialek + timedelta(days=i)).isoformat() for i in range(5)]
-        baza = (self.data or {}).get("plan") or {}
-        plan = {
-            iso: baza[iso] if iso in baza else self._plan_dodatkowy[iso]
-            for iso in dni
-            if iso in baza or iso in self._plan_dodatkowy
-        }
+        baza = (self.data or {}).get("plan_librus") or {}
+        plan = {}
+        for iso in dni:
+            lekcje = baza.get(iso, self._plan_dodatkowy.get(iso))
+            polaczone = LD.scal_dzien(lekcje or [], self._dodatkowe, _parse_date(iso))
+            if lekcje is not None or polaczone:  # dzien bez danych Librusa pokazujemy tylko z lekcjami dodatkowymi
+                plan[iso] = polaczone
         return {
             "przesuniecie": self._plan_tydzien,
             "od": dni[0],
@@ -898,7 +999,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             return False
         poniedzialek = _poniedzialek_tygodnia_szkolnego(_dzis()) + timedelta(weeks=nowe)
         dni = [(poniedzialek + timedelta(days=i)).isoformat() for i in range(5)]
-        baza = (self.data or {}).get("plan") or {}
+        baza = (self.data or {}).get("plan_librus") or {}
         if not any(iso in baza or iso in self._plan_dodatkowy for iso in dni):
             async with self._api_lock:
                 surowy = await self.client.async_get_timetable(poniedzialki=[poniedzialek])
@@ -1316,7 +1417,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             async with self._api_lock:
                 plan_raw = await self.client.async_get_timetable()
             if plan_raw is not None:
-                self._zastosuj_czesciowe({**self.data, "plan": _build_plan(plan_raw)})
+                baza = _build_plan(plan_raw)
+                self._zastosuj_czesciowe({**self.data, "plan_librus": baza, "plan": self._scal_plan(baza)})
         except Exception as err:
             _LOGGER.warning("Odswiezanie planu lekcji nie powiodlo sie: %s", err)
 
@@ -1361,10 +1463,10 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
 
             # Dane opcjonalne: przy bledzie pobierania zostaja poprzednie
             prev = self.data or {}
+            plan_librus = _build_plan(plan_raw) if plan_raw is not None else prev.get("plan_librus", {})
             dodatkowe: Dict[str, Any] = {
-                "plan": (
-                    _build_plan(plan_raw) if plan_raw is not None else prev.get("plan", {})
-                ),
+                "plan_librus": plan_librus,
+                "plan": self._scal_plan(plan_librus),
                 "obecnosc": (
                     _build_obecnosc(attendance_raw)
                     if attendance_raw is not None

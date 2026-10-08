@@ -575,7 +575,7 @@ def _termin_od(termin: str, dzis) -> bool:
         return True
 
 
-PLATFORMS = ["sensor", "binary_sensor", "calendar"]
+PLATFORMS = ["sensor", "binary_sensor", "calendar", "text", "select", "time", "date", "button"]
 
 CONFIG_SCHEMA = vol.Schema(
     {
@@ -1150,6 +1150,66 @@ _USLUGI = {
 }
 
 
+def _koordynator_uslugi(hass: HomeAssistant, call):
+    coordinators = hass.data.get(DOMAIN, {}).get("coordinators", {})
+    entry_id = call.data.get("config_entry_id")
+    return coordinators.get(entry_id) if entry_id else next(iter(coordinators.values()), None)
+
+
+def _zarejestruj_uslugi_lekcji_dodatkowych(hass: HomeAssistant) -> None:
+    """Uslugi dodawania i usuwania lekcji dodatkowych (te same, ktorych uzywaja przyciski formularza)."""
+    from homeassistant.exceptions import ServiceValidationError
+    from .lekcje_dodatkowe import COTYGODNIOWO, JEDNORAZOWO
+
+    async def _dodaj(call) -> None:
+        coordinator = _koordynator_uslugi(hass, call)
+        if coordinator is None:
+            _LOGGER.warning("dodaj_lekcje_dodatkowa: brak aktywnej integracji Librus")
+            return
+        d = call.data
+        try:
+            await coordinator.async_dodaj_lekcje_dodatkowa(
+                d["przedmiot"], d["od"], d["do"], powtarzanie=d["powtarzanie"],
+                dzien=d.get("dzien"), data=d.get("data"), miejsce=d["miejsce"],
+            )
+        except ValueError as err:
+            raise ServiceValidationError(str(err)) from err
+
+    async def _usun(call) -> None:
+        coordinator = _koordynator_uslugi(hass, call)
+        if coordinator is None:
+            _LOGGER.warning("usun_lekcje_dodatkowa: brak aktywnej integracji Librus")
+            return
+        if not await coordinator.async_usun_lekcje_dodatkowa(call.data["id"]):
+            raise ServiceValidationError("Nie ma lekcji dodatkowej o podanym identyfikatorze")
+
+    if not hass.services.has_service(DOMAIN, "dodaj_lekcje_dodatkowa"):
+        hass.services.async_register(
+            DOMAIN,
+            "dodaj_lekcje_dodatkowa",
+            _dodaj,
+            schema=vol.Schema(
+                {
+                    vol.Required("przedmiot"): cv.string,
+                    vol.Required("od"): cv.time,
+                    vol.Required("do"): cv.time,
+                    vol.Optional("powtarzanie", default=COTYGODNIOWO): vol.In([COTYGODNIOWO, JEDNORAZOWO]),
+                    vol.Optional("dzien"): vol.Any(vol.Coerce(int), cv.string),
+                    vol.Optional("data"): cv.date,
+                    vol.Optional("miejsce", default=""): cv.string,
+                    vol.Optional("config_entry_id"): str,
+                }
+            ),
+        )
+    if not hass.services.has_service(DOMAIN, "usun_lekcje_dodatkowa"):
+        hass.services.async_register(
+            DOMAIN,
+            "usun_lekcje_dodatkowa",
+            _usun,
+            schema=vol.Schema({vol.Required("id"): cv.string, vol.Optional("config_entry_id"): str}),
+        )
+
+
 def _zarejestruj_uslugi(hass: HomeAssistant) -> None:
     """Rejestruje uslugi integracji (kazda osobno, tylko jesli jeszcze nie istnieje)."""
 
@@ -1204,6 +1264,8 @@ def _zarejestruj_uslugi(hass: HomeAssistant) -> None:
             DOMAIN, "diagnostyka_ocen", _diagnostyka, schema=vol.Schema({vol.Optional("config_entry_id"): str})
         )
 
+    _zarejestruj_uslugi_lekcji_dodatkowych(hass)
+
     for nazwa, (metoda, pole, dozwolone) in _USLUGI.items():
         if hass.services.has_service(DOMAIN, nazwa):
             continue
@@ -1220,7 +1282,7 @@ def _zarejestruj_uslugi(hass: HomeAssistant) -> None:
 
 
 def _wyrejestruj_uslugi(hass: HomeAssistant) -> None:
-    for nazwa in (*_USLUGI, "diagnostyka_ocen"):
+    for nazwa in (*_USLUGI, "diagnostyka_ocen", "dodaj_lekcje_dodatkowa", "usun_lekcje_dodatkowa"):
         if hass.services.has_service(DOMAIN, nazwa):
             hass.services.async_remove(DOMAIN, nazwa)
 
@@ -1239,6 +1301,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     coordinator = LibrusDataUpdateCoordinator(hass, client, entry)
     await coordinator.async_wczytaj_tresci()
+    await coordinator.async_wczytaj_dodatkowe()
     await coordinator.async_config_entry_first_refresh()
     coordinator.async_uruchom_odswiezanie(entry)
 

@@ -15,6 +15,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
+from . import lekcje_dodatkowe as LD
 from .const import DOMAIN
 from .coordinator import (
     SYMBOL_NIEOBECNOSC,
@@ -74,6 +75,7 @@ async def async_setup_entry(
         LibrusPlanLekcjiSensor(coordinator, config_entry, "dzis"),
         LibrusPlanLekcjiSensor(coordinator, config_entry, "nastepny"),
         LibrusPlanTygodniaSensor(coordinator, config_entry),
+        LibrusLekcjeDodatkoweSensor(coordinator, config_entry),
         LibrusZadaniaDomoweSensor(coordinator, config_entry),
         LibrusFrekwencjaSensor(coordinator, config_entry),
         LibrusNieobecnosciSensor(coordinator, config_entry),
@@ -621,6 +623,49 @@ class LibrusPlanTygodniaSensor(_LibrusSensor):
         }
 
 
+class LibrusLekcjeDodatkoweSensor(_LibrusSensor):
+    """Lekcje dodatkowe dopisane recznie do planu (stan = ich liczba)."""
+
+    _odswiez_o_polnocy = True
+    _unrecorded_attributes = frozenset({"lekcje", "dzis"})
+
+    def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(
+            coordinator, config_entry, "Lekcje dodatkowe", "lekcje_dodatkowe", "mdi:calendar-plus"
+        )
+
+    @property
+    def native_value(self) -> int:
+        return len(self.coordinator.lekcje_dodatkowe())
+
+    @property
+    def extra_state_attributes(self) -> Dict[str, Any]:
+        lekcje = self.coordinator.lekcje_dodatkowe()
+        napisy = LD.etykiety(lekcje)
+        dzis = _dzis()
+        return {
+            "lekcje": [
+                {
+                    "id": l["id"],
+                    "przedmiot": l["przedmiot"],
+                    "powtarzanie": l["powtarzanie"],
+                    "termin": LD.opis_terminu(l),
+                    "dzien": LD.DNI_TYGODNIA[l["dzien"]] if l["powtarzanie"] == LD.COTYGODNIOWO else None,
+                    "data": l.get("data"),
+                    "od": l["od"],
+                    "do": l["do"],
+                    "miejsce": l.get("miejsce", ""),
+                    "etykieta": napisy[l["id"]],
+                }
+                for l in lekcje
+            ],
+            "dzis": [
+                {"przedmiot": l["przedmiot"], "od": l["od"], "do": l["do"], "miejsce": l["nauczyciel_sala"]}
+                for l in LD.lekcje_na_dzien(lekcje, dzis)
+            ],
+        }
+
+
 class LibrusZadaniaDomoweSensor(_LibrusSensor):
     """Zadania domowe z terminem w ciagu 7 dni (z trescia, jesli udalo sie pobrac)."""
 
@@ -975,6 +1020,7 @@ class LibrusAktualnaLekcjaSensor(_LibrusSensor):
             attrs.update({
                 "numer": lekcja["numer"], "od": lekcja["od"], "do": lekcja["do"],
                 "nauczyciel_sala": lekcja["nauczyciel_sala"], "zmiana": lekcja["zmiana"],
+                "dodatkowa": bool(lekcja.get("dodatkowa")),
             })
             if lekcja.get("zastepca"):
                 attrs["zastepca"] = lekcja["zastepca"]

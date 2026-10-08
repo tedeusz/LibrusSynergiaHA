@@ -1,0 +1,89 @@
+"""Listy wyboru formularza "Lekcja dodatkowa": powtarzanie, dzien tygodnia i lekcja do usuniecia."""
+from typing import List, Optional
+
+from homeassistant.components.select import SelectEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from .const import DOMAIN
+from .coordinator import LibrusDataUpdateCoordinator, LibrusEntityMixin
+from .lekcje_dodatkowe import COTYGODNIOWO, DNI_TYGODNIA, JEDNORAZOWO, etykiety
+
+POWTARZANIE = {COTYGODNIOWO: "co tydzień", JEDNORAZOWO: "jednorazowo"}
+
+
+async def async_setup_entry(
+    hass: HomeAssistant, config_entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
+    coordinator: LibrusDataUpdateCoordinator = hass.data[DOMAIN]["coordinators"][config_entry.entry_id]
+    async_add_entities([
+        LibrusWyborPowtarzania(coordinator, config_entry),
+        LibrusWyborDnia(coordinator, config_entry),
+        LibrusWyborDoUsuniecia(coordinator, config_entry),
+    ])
+
+
+class _Wybor(LibrusEntityMixin, CoordinatorEntity, SelectEntity):
+    def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry, nazwa: str, sufiks: str, ikona: str) -> None:
+        super().__init__(coordinator)
+        self._init_librus(config_entry, nazwa, f"dodatkowa_{sufiks}", ikona)
+
+
+class LibrusWyborPowtarzania(_Wybor):
+    """Czy zajecia powtarzaja sie co tydzien, czy odbeda sie raz."""
+
+    _attr_options = list(POWTARZANIE.values())
+
+    def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "Lekcja dodatkowa - powtarzanie", "powtarzanie", "mdi:repeat")
+
+    @property
+    def current_option(self) -> Optional[str]:
+        return POWTARZANIE.get(self.coordinator.formularz.get("powtarzanie"))
+
+    async def async_select_option(self, option: str) -> None:
+        klucz = next((k for k, v in POWTARZANIE.items() if v == option), None)
+        if klucz is not None:
+            self.coordinator.ustaw_formularz("powtarzanie", klucz)
+
+
+class LibrusWyborDnia(_Wybor):
+    """Dzien tygodnia zajec cotygodniowych."""
+
+    _attr_options = list(DNI_TYGODNIA)
+
+    def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "Lekcja dodatkowa - dzień", "dzien", "mdi:calendar-week")
+
+    @property
+    def current_option(self) -> Optional[str]:
+        dzien = self.coordinator.formularz.get("dzien")
+        return DNI_TYGODNIA[dzien] if isinstance(dzien, int) and 0 <= dzien < 7 else None
+
+    async def async_select_option(self, option: str) -> None:
+        if option in DNI_TYGODNIA:
+            self.coordinator.ustaw_formularz("dzien", DNI_TYGODNIA.index(option))
+
+
+class LibrusWyborDoUsuniecia(_Wybor):
+    """Zdefiniowane lekcje dodatkowe; wybrana jest usuwana przyciskiem "usuń"."""
+
+    def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "Lekcja dodatkowa - do usunięcia", "do_usuniecia", "mdi:playlist-remove")
+
+    @property
+    def options(self) -> List[str]:
+        return list(etykiety(self.coordinator.lekcje_dodatkowe()).values())
+
+    @property
+    def current_option(self) -> Optional[str]:
+        return etykiety(self.coordinator.lekcje_dodatkowe()).get(self.coordinator.do_usuniecia)
+
+    async def async_select_option(self, option: str) -> None:
+        for id_, napis in etykiety(self.coordinator.lekcje_dodatkowe()).items():
+            if napis == option:
+                self.coordinator.do_usuniecia = id_
+                self.coordinator.async_update_listeners()
+                return

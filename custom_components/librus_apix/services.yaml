@@ -196,3 +196,81 @@ diagnostyka_ocen:
       required: false
       selector:
         text:
+
+dodaj_lekcje_dodatkowa:
+  name: Dodaj lekcję dodatkową
+  description: Dopisuje do planu zajęcia, których nie ma w planie Librusa. Trafiają do wszystkich czujników planu, kalendarza i czasu końca ostatniej lekcji.
+  fields:
+    przedmiot:
+      name: Nazwa zajęć
+      required: true
+      example: Angielski
+      selector:
+        text:
+    od:
+      name: Od godziny
+      required: true
+      example: "16:00"
+      selector:
+        time:
+    do:
+      name: Do godziny
+      required: true
+      example: "17:00"
+      selector:
+        time:
+    powtarzanie:
+      name: Powtarzanie
+      required: false
+      default: co_tydzien
+      selector:
+        select:
+          options:
+            - co_tydzien
+            - jednorazowo
+    dzien:
+      name: Dzień tygodnia (dla zajęć cotygodniowych)
+      required: false
+      example: środa
+      selector:
+        select:
+          options:
+            - poniedziałek
+            - wtorek
+            - środa
+            - czwartek
+            - piątek
+            - sobota
+            - niedziela
+    data:
+      name: Data (dla zajęć jednorazowych)
+      required: false
+      selector:
+        date:
+    miejsce:
+      name: Miejsce lub prowadzący
+      required: false
+      example: Szkoła językowa, sala 3
+      selector:
+        text:
+    config_entry_id:
+      name: Wpis integracji
+      required: false
+      selector:
+        text:
+
+usun_lekcje_dodatkowa:
+  name: Usuń lekcję dodatkową
+  description: Usuwa zajęcia dopisane wcześniej do planu. Identyfikatory są w atrybucie "lekcje" czujnika Lekcje dodatkowe.
+  fields:
+    id:
+      name: Identyfikator
+      required: true
+      example: a1b2c3d4
+      selector:
+        text:
+    config_entry_id:
+      name: Wpis integracji
+      required: false
+      selector:
+        text:
