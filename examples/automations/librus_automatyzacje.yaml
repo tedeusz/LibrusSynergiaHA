@@ -181,8 +181,8 @@
       data:
         title: "📢 Ogłoszenie: {{ trigger.event.data.tytul }}"
         message: >-
-          {{ trigger.event.data.tresc | replace('\n', ' ') | truncate(300) }}
-          {%- if trigger.event.data.autor %} — {{ trigger.event.data.autor }}{% endif %}
+          {{ trigger.event.data.tresc | truncate(1500) }}
+          {%- if trigger.event.data.autor %}{{ '\n\n— ' ~ trigger.event.data.autor }}{% endif %}
         data:
           ttl: 0
           priority: high

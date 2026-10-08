@@ -838,9 +838,7 @@ class LibrusOgloszeniaSensor(_LibrusSensor):
                 {**o, "tresc": o["tresc"][:500]} for o in lista[:MAX_OGLOSZEN_W_ATRYBUTACH]
             ],
             # Aktualny ekran przegladania (usluga librus_apix.przegladaj_ogloszenia) - cala lista
-            "przegladanie": (
-                lambda w: {**w, "ogloszenia": [{**o, "tresc": o["tresc"][:600]} for o in w["ogloszenia"]]}
-            )(self.coordinator.widok_ogloszen()),
+            "przegladanie": self.coordinator.widok_ogloszen(),  # pelne tresci (kilka pozycji na ekran)
         }
 
 

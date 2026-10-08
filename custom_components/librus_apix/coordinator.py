@@ -1789,7 +1789,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                     "tytul": o["tytul"],
                     "autor": o["autor"],
                     "data": o["data"],
-                    "tresc": o["tresc"][:500],
+                    "tresc": o["tresc"],  # cala tresc - skracanie to sprawa automatyzacji (limit powiadomien push)
                 },
             )
 
