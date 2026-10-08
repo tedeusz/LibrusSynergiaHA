@@ -900,7 +900,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             return
         try:
             zapisane = await self._dodatkowe_store.async_load()
-            self._dodatkowe = LD.usun_przedawnione(LD.z_zapisu(zapisane), _dzis())
+            self._dodatkowe = LD.z_zapisu(zapisane)  # nic nie usuwamy automatycznie - tylko ty usuwasz zajecia
         except Exception as err:  # uszkodzony zapis nie moze blokowac startu integracji
             _LOGGER.warning("Nie udalo sie wczytac lekcji dodatkowych: %s", err)
 

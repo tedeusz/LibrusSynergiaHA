@@ -24,8 +24,6 @@ DNI_SKROT = ["pon", "wt", "śr", "czw", "pt", "sob", "niedz"]
 NUMER_DODATKOWEJ = "+"
 # Ile dni od poniedzialku biezacego tygodnia obejmuje plan scalony w danych (2 pobierane tygodnie)
 HORYZONT_DNI = 14
-# Jednorazowe lekcje starsze niz tyle dni sa usuwane przy wczytaniu
-PRZEDAWNIENIE_DNI = 30
 # Na ile dni do przodu pokazujemy terminy do odwolania/przywrocenia
 TERMINY_DNI = 21
 
@@ -235,16 +233,6 @@ def scal_plan(
         if iso in plan_librus or polaczone:
             wynik[iso] = polaczone
     return wynik
-
-
-def usun_przedawnione(lekcje: List[Dict[str, Any]], dzis: date) -> List[Dict[str, Any]]:
-    """Odrzuc lekcje zakonczone (jednorazowe albo z data zakonczenia) wczesniej niz PRZEDAWNIENIE_DNI dni temu i stare odwolane terminy."""
-    granica = (dzis - timedelta(days=PRZEDAWNIENIE_DNI)).isoformat()
-    return [
-        {**l, "odwolane": [d for d in l.get("odwolane", []) if d >= granica]}
-        for l in lekcje
-        if (l["data"] if l["powtarzanie"] == JEDNORAZOWO else l.get("wazne_do") or "9999") >= granica
-    ]
 
 
 def terminy(lekcje: Iterable[Dict[str, Any]], od: date, dni: int = TERMINY_DNI) -> List[Dict[str, Any]]:
