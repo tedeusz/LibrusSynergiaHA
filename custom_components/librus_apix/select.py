@@ -1,4 +1,4 @@
-"""Listy wyboru formularza "Lekcja dodatkowa": powtarzanie, dzien tygodnia i lekcja do usuniecia."""
+"""Listy wyboru formularza "Lekcja dodatkowa": powtarzanie, dzien tygodnia, edycja, usuwanie i odwolywanie terminu."""
 from typing import List, Optional
 
 from homeassistant.components.select import SelectEntity
@@ -9,9 +9,12 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import LibrusDataUpdateCoordinator, LibrusEntityMixin
-from .lekcje_dodatkowe import COTYGODNIOWO, DNI_TYGODNIA, JEDNORAZOWO, etykiety
+from .lekcje_dodatkowe import COTYGODNIOWO, DNI_TYGODNIA, JEDNORAZOWO, etykiety, etykiety_terminow
 
 POWTARZANIE = {COTYGODNIOWO: "co tydzień", JEDNORAZOWO: "jednorazowo"}
+# Pierwsza opcja list: stan "nic nie wybrano" (zamiast "unknown")
+NIC_NIE_WYBRANO = "— wybierz —"
+NOWE_ZAJECIA = "➕ nowe zajęcia"
 
 
 async def async_setup_entry(
@@ -22,6 +25,8 @@ async def async_setup_entry(
         LibrusWyborPowtarzania(coordinator, config_entry),
         LibrusWyborDnia(coordinator, config_entry),
         LibrusWyborDoUsuniecia(coordinator, config_entry),
+        LibrusWyborEdycji(coordinator, config_entry),
+        LibrusWyborTerminu(coordinator, config_entry),
     ])
 
 
@@ -75,15 +80,58 @@ class LibrusWyborDoUsuniecia(_Wybor):
 
     @property
     def options(self) -> List[str]:
-        return list(etykiety(self.coordinator.lekcje_dodatkowe()).values())
+        return [NIC_NIE_WYBRANO, *etykiety(self.coordinator.lekcje_dodatkowe()).values()]
 
     @property
     def current_option(self) -> Optional[str]:
-        return etykiety(self.coordinator.lekcje_dodatkowe()).get(self.coordinator.do_usuniecia)
+        return etykiety(self.coordinator.lekcje_dodatkowe()).get(self.coordinator.do_usuniecia, NIC_NIE_WYBRANO)
+
+    async def async_select_option(self, option: str) -> None:
+        self.coordinator.do_usuniecia = next(
+            (id_ for id_, napis in etykiety(self.coordinator.lekcje_dodatkowe()).items() if napis == option), None
+        )
+        self.coordinator.async_update_listeners()
+
+
+class LibrusWyborEdycji(_Wybor):
+    """Wybor zajec do edycji: wczytuje je do formularza; "nowe zajecia" czysci formularz i wraca do dodawania."""
+
+    def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "Lekcja dodatkowa - edycja", "edycja", "mdi:pencil")
+
+    @property
+    def options(self) -> List[str]:
+        return [NOWE_ZAJECIA, *etykiety(self.coordinator.lekcje_dodatkowe()).values()]
+
+    @property
+    def current_option(self) -> Optional[str]:
+        return etykiety(self.coordinator.lekcje_dodatkowe()).get(self.coordinator.edytowana, NOWE_ZAJECIA)
 
     async def async_select_option(self, option: str) -> None:
         for id_, napis in etykiety(self.coordinator.lekcje_dodatkowe()).items():
             if napis == option:
-                self.coordinator.do_usuniecia = id_
-                self.coordinator.async_update_listeners()
+                self.coordinator.wczytaj_do_formularza(id_)
                 return
+        self.coordinator.wyczysc_formularz()
+
+
+class LibrusWyborTerminu(_Wybor):
+    """Najblizsze terminy zajec dodatkowych (z planu); wybrany odwolujesz albo przywracasz przyciskami."""
+
+    def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "Lekcja dodatkowa - termin", "termin", "mdi:calendar-cursor")
+
+    def _etykiety(self) -> dict:
+        return etykiety_terminow(self.coordinator.terminy_dodatkowych())
+
+    @property
+    def options(self) -> List[str]:
+        return [NIC_NIE_WYBRANO, *self._etykiety().values()]
+
+    @property
+    def current_option(self) -> Optional[str]:
+        return self._etykiety().get(self.coordinator.termin, NIC_NIE_WYBRANO)
+
+    async def async_select_option(self, option: str) -> None:
+        self.coordinator.termin = next((k for k, napis in self._etykiety().items() if napis == option), None)
+        self.coordinator.async_update_listeners()

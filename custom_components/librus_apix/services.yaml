@@ -259,6 +259,108 @@ dodaj_lekcje_dodatkowa:
       selector:
         text:
 
+edytuj_lekcje_dodatkowa:
+  name: Edytuj lekcję dodatkową
+  description: Zmienia wybrane pola zajęć dodatkowych (pominięte pola zostają bez zmian). Odwołane terminy, które nadal pasują do nowego terminu, zostają odwołane.
+  fields:
+    id:
+      name: Identyfikator zajęć
+      description: Z atrybutu "lekcje" czujnika "Lekcje dodatkowe".
+      required: true
+      selector:
+        text:
+    przedmiot:
+      name: Nazwa zajęć
+      required: false
+      selector:
+        text:
+    od:
+      name: Od godziny
+      required: false
+      selector:
+        time:
+    do:
+      name: Do godziny
+      required: false
+      selector:
+        time:
+    powtarzanie:
+      name: Powtarzanie
+      required: false
+      selector:
+        select:
+          options:
+            - co_tydzien
+            - jednorazowo
+    dzien:
+      name: Dzień tygodnia (dla zajęć cotygodniowych)
+      required: false
+      selector:
+        select:
+          options:
+            - poniedziałek
+            - wtorek
+            - środa
+            - czwartek
+            - piątek
+            - sobota
+            - niedziela
+    data:
+      name: Data (dla zajęć jednorazowych)
+      required: false
+      selector:
+        date:
+    miejsce:
+      name: Miejsce lub prowadzący
+      required: false
+      selector:
+        text:
+    config_entry_id:
+      name: Wpis integracji
+      required: false
+      selector:
+        text:
+
+odwolaj_termin_lekcji_dodatkowej:
+  name: Odwołaj termin zajęć dodatkowych
+  description: Odwołuje zajęcia dodatkowe tylko w jednym dniu. W planie zostają jako odwołane (nie liczą się do końca lekcji), a kolejne tygodnie bez zmian.
+  fields:
+    id:
+      name: Identyfikator zajęć
+      required: true
+      selector:
+        text:
+    data:
+      name: Data odwoływanego terminu
+      required: true
+      selector:
+        date:
+    config_entry_id:
+      name: Wpis integracji
+      required: false
+      selector:
+        text:
+
+przywroc_termin_lekcji_dodatkowej:
+  name: Przywróć termin zajęć dodatkowych
+  description: Cofa odwołanie zajęć dodatkowych w jednym dniu.
+  fields:
+    id:
+      name: Identyfikator zajęć
+      required: true
+      selector:
+        text:
+    data:
+      name: Data przywracanego terminu
+      required: true
+      selector:
+        date:
+    config_entry_id:
+      name: Wpis integracji
+      required: false
+      selector:
+        text:
+
 usun_lekcje_dodatkowa:
   name: Usuń lekcję dodatkową
   description: Usuwa zajęcia dopisane wcześniej do planu. Identyfikatory są w atrybucie "lekcje" czujnika Lekcje dodatkowe.

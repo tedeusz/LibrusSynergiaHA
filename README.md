@@ -87,6 +87,8 @@ Usługi przesuwają ekran listy (atrybut `przegladanie` odpowiedniego sensora) i
 | `librus_apix.przegladaj_uwagi` | Lista uwag i pochwał |
 | `librus_apix.przegladaj_plan` | Tydzień planu lekcji: `kierunek` = `poprzedni`, `biezacy`, `nastepny` |
 | `librus_apix.dodaj_lekcje_dodatkowa` | Dopisuje zajęcia do planu: `przedmiot`, `od`, `do`, `powtarzanie` (`co_tydzien` / `jednorazowo`), `dzien` (0 = poniedziałek … 6) albo `data`, opcjonalnie `miejsce` |
+| `librus_apix.edytuj_lekcje_dodatkowa` | Zmienia wybrane pola zajęć (`id` + dowolne z: `przedmiot`, `od`, `do`, `powtarzanie`, `dzien`, `data`, `miejsce`); pominięte zostają bez zmian |
+| `librus_apix.odwolaj_termin_lekcji_dodatkowej` / `librus_apix.przywroc_termin_lekcji_dodatkowej` | Odwołuje (przywraca) zajęcia tylko w jednym dniu: `id` + `data` |
 | `librus_apix.usun_lekcje_dodatkowa` | Usuwa zajęcia po `id` (z atrybutu `lekcje` sensora `..._lekcje_dodatkowe`) |
 | `librus_apix.diagnostyka_ocen` | Zapisuje raport diagnostyczny ocen w katalogu konfiguracji HA |
 
@@ -394,6 +396,8 @@ Zajęcia spoza planu Librusa dodajesz w UI, bez edycji YAML-a: wpisz nazwę (i o
 - Zajęcia są zapisane w `Store` Home Assistanta (przeżywają restart i aktualizację), osobno dla każdego konta. Jednorazowe zajęcia starsze niż 30 dni są usuwane przy starcie.
 - Plan, który widzą czujniki (`..._plan_lekcji_dzis`, `..._nastepny_dzien`, `..._tydzien`, `..._aktualna_lekcja`), kalendarz oraz znaczniki `..._poczatek_lekcji_*` i `..._koniec_lekcji_dzis`, to **suma planu z Librusa i zajęć dodatkowych** posortowana wg godziny rozpoczęcia. Dlatego automatyzacja „koniec ostatniej lekcji” uwzględnia je bez żadnych zmian w wyzwalaczu.
 - Zajęcia dodatkowe mają `numer` równy `+` i atrybut `dodatkowa: true` (w kalendarzu mają przedrostek ➕). Jeśli Librus chwilowo nie zwróci planu, plan składa się z samych zajęć dodatkowych, a po następnym udanym pobraniu wraca pełny.
+- **Odwołanie jednego terminu**: wybierz termin na liście `..._lekcja_dodatkowa_termin` (pod planem) i naciśnij `..._odwolaj_termin`. Zajęcia zostają w planie jako ❌ odwołane (jak odwołana lekcja szkolna: nie liczą się do ostatniej lekcji ani do „aktualnej lekcji”), kolejne tygodnie bez zmian. `..._przywroc_termin` cofa odwołanie. To samo robią usługi `odwolaj_termin_lekcji_dodatkowej` i `przywroc_termin_lekcji_dodatkowej`.
+- **Edycja**: wybierz zajęcia na liście `..._lekcja_dodatkowa_edycja` (ładują się do formularza), zmień pola i naciśnij `..._zapisz_zmiany`; „➕ nowe zajęcia” wraca do dodawania. Zachowują identyfikator i te odwołane terminy, które nadal pasują do nowego dnia.
 - Ponowne dodanie takich samych zajęć (ta sama nazwa, godziny i termin) jest odrzucane.
 
 ## 🛠️ Rozwój

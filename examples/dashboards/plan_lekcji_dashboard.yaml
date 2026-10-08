@@ -4,6 +4,8 @@
 # Druga zakladka ("Zajęcia dodatkowe") to formularz do recznego dopisywania zajec, ktorych nie ma w planie Librusa
 # (encje text/select/time/date/button.librus_imie_nazwisko_lekcja_dodatkowa_*). Dodane zajecia sa scalane z planem Librusa
 # we wszystkich czujnikach planu i w kalendarzu (oznaczone ➕), wiec np. "koniec ostatniej lekcji" je uwzglednia.
+# Pojedynczy termin zajec odwolasz na dole zakladki z planem (zostaje w planie jako ❌ odwolane), a istniejace zajecia
+# edytujesz w drugiej zakladce (wybierz je na liscie "Edytuj istniejace", zmien pola i "Zapisz zmiany").
 # Przy zrealizowanych lekcjach pokazuje temat (Librus udostepnia tematy z ostatnich ~4 dni).
 title: Librus
 views:
@@ -79,7 +81,7 @@ views:
               {%- endif %}
               {%- set trwa = (roznica == 0 and akt_nr is not none and (l.numer | string) == (akt_nr | string) and l.od == akt_od and not l.odwolana) %}
               {%- if l.odwolana %}
-              - ❌ **{{ l.numer }}** · {{ l.od }}–{{ l.do }} · ~~{{ l.przedmiot }}~~ _({{ l.zmiana | lower }})_
+              - ❌ **{{ '➕' if l.dodatkowa is defined and l.dodatkowa else l.numer }}** · {{ l.od }}–{{ l.do }} · ~~{{ l.przedmiot }}~~ _({{ l.zmiana | lower }})_
               {%- elif l.dodatkowa is defined and l.dodatkowa %}
               - **{{ '🟢' if trwa else '➕' }}** · {{ l.od }}–{{ l.do }} · {{ l.przedmiot }}{% if l.nauczyciel_sala %} · {{ l.nauczyciel_sala }}{% endif %} _({{ 'trwa teraz' if trwa else 'zajęcia dodatkowe' }})_
               {%- elif l.zmiana %}
@@ -124,6 +126,27 @@ views:
                   data:
                     kierunek: nastepny
 
+          # --- Odwolanie jednego terminu zajec dodatkowych (widoczne, gdy sa jakies zajecia dodatkowe) ---
+          - type: conditional
+            conditions:
+              - condition: numeric_state
+                entity: sensor.librus_imie_nazwisko_lekcje_dodatkowe
+                above: 0
+            card:
+              type: entities
+              title: ➕ Zajęcia dodatkowe – odwołaj termin
+              show_header_toggle: false
+              state_color: false
+              entities:
+                - entity: select.librus_imie_nazwisko_lekcja_dodatkowa_termin
+                  name: Termin
+                - entity: button.librus_imie_nazwisko_lekcja_dodatkowa_odwolaj_termin
+                  name: Odwołaj ten termin (tylko ten jeden dzień)
+                  icon: mdi:calendar-remove
+                - entity: button.librus_imie_nazwisko_lekcja_dodatkowa_przywroc_termin
+                  name: Przywróć odwołany termin
+                  icon: mdi:calendar-check
+
   # ===========================================================================
   # Zakladka 2: zajecia dodatkowe (dopisywane recznie do planu z Librusa)
   # ===========================================================================
@@ -151,10 +174,13 @@ views:
 
       # --- Formularz dodawania (jedna karta; dzien tygodnia albo data zaleznie od powtarzania) ---
       - type: entities
-        title: Dodaj zajęcia
+        title: Dodaj lub edytuj zajęcia
         show_header_toggle: false
         state_color: false
         entities:
+          - entity: select.librus_imie_nazwisko_lekcja_dodatkowa_edycja
+            name: Edytuj istniejące
+          - type: divider
           - entity: text.librus_imie_nazwisko_lekcja_dodatkowa_nazwa
             name: Nazwa zajęć
           - entity: text.librus_imie_nazwisko_lekcja_dodatkowa_miejsce
@@ -183,9 +209,25 @@ views:
           - entity: time.librus_imie_nazwisko_lekcja_dodatkowa_do
             name: Do godziny
           - type: divider
-          - entity: button.librus_imie_nazwisko_lekcja_dodatkowa_dodaj
-            name: Dodaj do planu
-            icon: mdi:plus-circle
+          # "Dodaj" gdy nic nie edytujesz, "Zapisz zmiany" gdy wybrano zajecia do edycji
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: select.librus_imie_nazwisko_lekcja_dodatkowa_edycja
+                state: "➕ nowe zajęcia"
+            row:
+              entity: button.librus_imie_nazwisko_lekcja_dodatkowa_dodaj
+              name: Dodaj do planu
+              icon: mdi:plus-circle
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: select.librus_imie_nazwisko_lekcja_dodatkowa_edycja
+                state_not: "➕ nowe zajęcia"
+            row:
+              entity: button.librus_imie_nazwisko_lekcja_dodatkowa_zapisz_zmiany
+              name: Zapisz zmiany
+              icon: mdi:content-save
 
       # --- Usuwanie (jedna karta) ---
       - type: entities

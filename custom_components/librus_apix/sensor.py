@@ -627,7 +627,7 @@ class LibrusLekcjeDodatkoweSensor(_LibrusSensor):
     """Lekcje dodatkowe dopisane recznie do planu (stan = ich liczba)."""
 
     _odswiez_o_polnocy = True
-    _unrecorded_attributes = frozenset({"lekcje", "dzis"})
+    _unrecorded_attributes = frozenset({"lekcje", "dzis", "terminy"})
 
     def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
         super().__init__(
@@ -655,13 +655,19 @@ class LibrusLekcjeDodatkoweSensor(_LibrusSensor):
                     "od": l["od"],
                     "do": l["do"],
                     "miejsce": l.get("miejsce", ""),
+                    "odwolane_terminy": l.get("odwolane", []),
                     "etykieta": napisy[l["id"]],
                 }
                 for l in lekcje
             ],
             "dzis": [
-                {"przedmiot": l["przedmiot"], "od": l["od"], "do": l["do"], "miejsce": l["nauczyciel_sala"]}
+                {"przedmiot": l["przedmiot"], "od": l["od"], "do": l["do"], "miejsce": l["nauczyciel_sala"],
+                 "odwolana": l["odwolana"]}
                 for l in LD.lekcje_na_dzien(lekcje, dzis)
+            ],
+            "terminy": [
+                {k: t[k] for k in ("id", "data", "przedmiot", "od", "do", "odwolana")}
+                for t in LD.terminy(lekcje, dzis)
             ],
         }
 

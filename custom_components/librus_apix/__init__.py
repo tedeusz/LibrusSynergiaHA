@@ -1157,7 +1157,7 @@ def _koordynator_uslugi(hass: HomeAssistant, call):
 
 
 def _zarejestruj_uslugi_lekcji_dodatkowych(hass: HomeAssistant) -> None:
-    """Uslugi dodawania i usuwania lekcji dodatkowych (te same, ktorych uzywaja przyciski formularza)."""
+    """Uslugi lekcji dodatkowych: dodawanie, edycja, odwolywanie terminu i usuwanie (te same, ktorych uzywaja przyciski)."""
     from homeassistant.exceptions import ServiceValidationError
     from .lekcje_dodatkowe import COTYGODNIOWO, JEDNORAZOWO
 
@@ -1201,6 +1201,62 @@ def _zarejestruj_uslugi_lekcji_dodatkowych(hass: HomeAssistant) -> None:
                 }
             ),
         )
+    async def _edytuj(call) -> None:
+        coordinator = _koordynator_uslugi(hass, call)
+        if coordinator is None:
+            _LOGGER.warning("edytuj_lekcje_dodatkowa: brak aktywnej integracji Librus")
+            return
+        d = call.data
+        try:
+            await coordinator.async_edytuj_lekcje_dodatkowa(
+                d["id"], przedmiot=d.get("przedmiot"), od=d.get("od"), do=d.get("do"),
+                powtarzanie=d.get("powtarzanie"), dzien=d.get("dzien"), data=d.get("data"), miejsce=d.get("miejsce"),
+            )
+        except ValueError as err:
+            raise ServiceValidationError(str(err)) from err
+
+    def _termin(odwolana: bool):
+        async def _obsluga(call) -> None:
+            coordinator = _koordynator_uslugi(hass, call)
+            if coordinator is None:
+                _LOGGER.warning("termin lekcji dodatkowej: brak aktywnej integracji Librus")
+                return
+            try:
+                await coordinator.async_ustaw_odwolanie_terminu(call.data["id"], call.data["data"], odwolana)
+            except ValueError as err:
+                raise ServiceValidationError(str(err)) from err
+
+        return _obsluga
+
+    if not hass.services.has_service(DOMAIN, "edytuj_lekcje_dodatkowa"):
+        hass.services.async_register(
+            DOMAIN,
+            "edytuj_lekcje_dodatkowa",
+            _edytuj,
+            schema=vol.Schema(
+                {
+                    vol.Required("id"): cv.string,
+                    vol.Optional("przedmiot"): cv.string,
+                    vol.Optional("od"): cv.time,
+                    vol.Optional("do"): cv.time,
+                    vol.Optional("powtarzanie"): vol.In([COTYGODNIOWO, JEDNORAZOWO]),
+                    vol.Optional("dzien"): vol.Any(vol.Coerce(int), cv.string),
+                    vol.Optional("data"): cv.date,
+                    vol.Optional("miejsce"): cv.string,
+                    vol.Optional("config_entry_id"): str,
+                }
+            ),
+        )
+    for nazwa, odwolana in (("odwolaj_termin_lekcji_dodatkowej", True), ("przywroc_termin_lekcji_dodatkowej", False)):
+        if not hass.services.has_service(DOMAIN, nazwa):
+            hass.services.async_register(
+                DOMAIN,
+                nazwa,
+                _termin(odwolana),
+                schema=vol.Schema(
+                    {vol.Required("id"): cv.string, vol.Required("data"): cv.date, vol.Optional("config_entry_id"): str}
+                ),
+            )
     if not hass.services.has_service(DOMAIN, "usun_lekcje_dodatkowa"):
         hass.services.async_register(
             DOMAIN,
@@ -1282,7 +1338,10 @@ def _zarejestruj_uslugi(hass: HomeAssistant) -> None:
 
 
 def _wyrejestruj_uslugi(hass: HomeAssistant) -> None:
-    for nazwa in (*_USLUGI, "diagnostyka_ocen", "dodaj_lekcje_dodatkowa", "usun_lekcje_dodatkowa"):
+    for nazwa in (
+        *_USLUGI, "diagnostyka_ocen", "dodaj_lekcje_dodatkowa", "edytuj_lekcje_dodatkowa",
+        "odwolaj_termin_lekcji_dodatkowej", "przywroc_termin_lekcji_dodatkowej", "usun_lekcje_dodatkowa",
+    ):
         if hass.services.has_service(DOMAIN, nazwa):
             hass.services.async_remove(DOMAIN, nazwa)
 

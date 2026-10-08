@@ -24,6 +24,8 @@ NUMER_DODATKOWEJ = "+"
 HORYZONT_DNI = 14
 # Jednorazowe lekcje starsze niz tyle dni sa usuwane przy wczytaniu
 PRZEDAWNIENIE_DNI = 30
+# Na ile dni do przodu pokazujemy terminy do odwolania/przywrocenia
+TERMINY_DNI = 21
 
 _GODZINA = re.compile(r"^(\d{1,2}):(\d{2})(?::\d{2})?$")
 
@@ -44,7 +46,7 @@ def _hhmm(godzina: Any) -> str:
     return f"{m // 60:02d}:{m % 60:02d}"
 
 
-def _data_iso(wartosc: Any) -> Optional[str]:
+def data_iso(wartosc: Any) -> Optional[str]:
     if wartosc in (None, ""):
         return None
     if isinstance(wartosc, datetime):
@@ -67,6 +69,7 @@ def nowa_lekcja(
     data: Any = None,
     miejsce: str = "",
     id: Optional[str] = None,
+    odwolane: Optional[Iterable[Any]] = None,
 ) -> Dict[str, Any]:
     """Zwaliduj dane i zwroc rekord lekcji dodatkowej (ValueError z czytelnym komunikatem)."""
     przedmiot = " ".join(str(przedmiot or "").split())
@@ -84,9 +87,10 @@ def nowa_lekcja(
         "od": poczatek,
         "do": koniec,
         "miejsce": " ".join(str(miejsce or "").split()),
+        "odwolane": sorted({data_iso(d) for d in odwolane or [] if d}),  # terminy (daty), ktore odwolano
     }
     if powtarzanie == JEDNORAZOWO:
-        iso = _data_iso(data)
+        iso = data_iso(data)
         if not iso:
             raise ValueError("Dla zajęć jednorazowych podaj datę")
         rekord["data"] = iso
@@ -122,7 +126,8 @@ def etykiety(lekcje: List[Dict[str, Any]]) -> Dict[str, str]:
     return wynik
 
 
-def _pasuje(l: Dict[str, Any], dzien: date) -> bool:
+def pasuje(l: Dict[str, Any], dzien: date) -> bool:
+    """Czy zajecia odbywaja sie danego dnia (z uwzglednieniem odwolanych terminow - te tez "pasuja")."""
     if l["powtarzanie"] == JEDNORAZOWO:
         return l["data"] == dzien.isoformat()
     return l["dzien"] == dzien.weekday()
@@ -132,15 +137,16 @@ def lekcje_na_dzien(lekcje: Iterable[Dict[str, Any]], dzien: date) -> List[Dict[
     """Lekcje dodatkowe przypadajace na dzien - w formacie lekcji planu (jak z _build_plan)."""
     wynik = []
     for l in lekcje:
-        if _pasuje(l, dzien):
+        if pasuje(l, dzien):
+            odwolana = dzien.isoformat() in l.get("odwolane", [])
             wynik.append({
                 "numer": NUMER_DODATKOWEJ,
                 "przedmiot": l["przedmiot"],
                 "nauczyciel_sala": l.get("miejsce", ""),
                 "od": l["od"],
                 "do": l["do"],
-                "zmiana": "",
-                "odwolana": False,
+                "zmiana": "Odwołane" if odwolana else "",
+                "odwolana": odwolana,
                 "dodatkowa": True,
                 "id_dodatkowej": l["id"],
             })
@@ -187,9 +193,81 @@ def scal_plan(
 
 
 def usun_przedawnione(lekcje: List[Dict[str, Any]], dzis: date) -> List[Dict[str, Any]]:
-    """Odrzuc jednorazowe lekcje starsze niz PRZEDAWNIENIE_DNI; cotygodniowe zostaja."""
+    """Odrzuc jednorazowe lekcje starsze niz PRZEDAWNIENIE_DNI i stare odwolane terminy; cotygodniowe zostaja."""
     granica = (dzis - timedelta(days=PRZEDAWNIENIE_DNI)).isoformat()
-    return [l for l in lekcje if l["powtarzanie"] != JEDNORAZOWO or l["data"] >= granica]
+    return [
+        {**l, "odwolane": [d for d in l.get("odwolane", []) if d >= granica]}
+        for l in lekcje
+        if l["powtarzanie"] != JEDNORAZOWO or l["data"] >= granica
+    ]
+
+
+def terminy(lekcje: Iterable[Dict[str, Any]], dzis: date, dni: int = TERMINY_DNI) -> List[Dict[str, Any]]:
+    """Najblizsze terminy lekcji dodatkowych (od dzis, `dni` dni do przodu) - do odwolywania/przywracania."""
+    wynik = []
+    for przesuniecie in range(dni):
+        dzien = dzis + timedelta(days=przesuniecie)
+        for l in lekcje:
+            if pasuje(l, dzien):
+                wynik.append({
+                    "klucz": f"{l['id']}|{dzien.isoformat()}",
+                    "id": l["id"],
+                    "data": dzien.isoformat(),
+                    "przedmiot": l["przedmiot"],
+                    "od": l["od"],
+                    "do": l["do"],
+                    "odwolana": dzien.isoformat() in l.get("odwolane", []),
+                })
+    wynik.sort(key=lambda t: (t["data"], minuty(t["od"]) or 0))
+    return wynik
+
+
+def etykiety_terminow(lista: List[Dict[str, Any]]) -> Dict[str, str]:
+    """{klucz: etykieta}, np. "Angielski · czw 09.10 16:00–17:00" (❌ przed nazwa, gdy termin odwolany)."""
+    wynik: Dict[str, str] = {}
+    uzyte: set = set()
+    for t in lista:
+        d = date.fromisoformat(t["data"])
+        napis = f"{'❌ ' if t['odwolana'] else ''}{t['przedmiot']} · {DNI_SKROT[d.weekday()]} {d:%d.%m} {t['od']}–{t['do']}"
+        if napis in uzyte:
+            napis = f"{napis} ({t['id']})"
+        uzyte.add(napis)
+        wynik[t["klucz"]] = napis
+    return wynik
+
+
+def ustaw_odwolanie(l: Dict[str, Any], data: Any, odwolana: bool = True) -> bool:
+    """Odwolaj (albo przywroc) jeden termin zajec; zwraca True, gdy cos sie zmienilo. ValueError, gdy zajec tego dnia nie ma."""
+    iso = data_iso(data)
+    if not iso:
+        raise ValueError("Podaj datę terminu")
+    if not pasuje(l, date.fromisoformat(iso)):
+        raise ValueError(f"Zajęcia „{l['przedmiot']}” nie odbywają się w dniu {iso}")
+    obecne = set(l.get("odwolane", []))
+    if (iso in obecne) == odwolana:
+        return False
+    obecne.add(iso) if odwolana else obecne.discard(iso)
+    l["odwolane"] = sorted(obecne)
+    return True
+
+
+def zmien(
+    l: Dict[str, Any], *, przedmiot: Any = None, od: Any = None, do: Any = None, powtarzanie: Any = None,
+    dzien: Any = None, data: Any = None, miejsce: Any = None,
+) -> Dict[str, Any]:
+    """Nowy rekord z zastosowanymi zmianami (None = bez zmian); zachowuje id i te odwolane terminy, ktore nadal pasuja."""
+    nowy = nowa_lekcja(
+        l["przedmiot"] if przedmiot is None else przedmiot,
+        l["od"] if od is None else od,
+        l["do"] if do is None else do,
+        powtarzanie=l["powtarzanie"] if powtarzanie is None else powtarzanie,
+        dzien=l.get("dzien") if dzien is None else dzien,
+        data=l.get("data") if data is None else data,
+        miejsce=l.get("miejsce", "") if miejsce is None else miejsce,
+        id=l["id"],
+    )
+    nowy["odwolane"] = [d for d in l.get("odwolane", []) if pasuje(nowy, date.fromisoformat(d))]
+    return nowy
 
 
 def z_zapisu(surowe: Any) -> List[Dict[str, Any]]:
@@ -200,6 +278,7 @@ def z_zapisu(surowe: Any) -> List[Dict[str, Any]]:
             wynik.append(nowa_lekcja(
                 r["przedmiot"], r["od"], r["do"], powtarzanie=r.get("powtarzanie", COTYGODNIOWO),
                 dzien=r.get("dzien"), data=r.get("data"), miejsce=r.get("miejsce", ""), id=r.get("id"),
+                odwolane=r.get("odwolane"),
             ))
         except (KeyError, ValueError, TypeError, AttributeError):
             continue

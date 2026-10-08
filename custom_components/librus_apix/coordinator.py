@@ -372,7 +372,9 @@ def _podsumowanie_dnia(dzien: date, lekcje: List[Dict[str, Any]]) -> Dict[str, A
         "ostatnia_lekcja_do": aktywne[-1]["do"] if aktywne else None,
         "liczba_zmian": sum(1 for l in lekcje if l["zmiana"]),
         "odwolane": [
-            f"{l['numer']}. {l['przedmiot']}" for l in lekcje if l["odwolana"]
+            (l["przedmiot"] if l.get("dodatkowa") else f"{l['numer']}. {l['przedmiot']}")
+            for l in lekcje
+            if l["odwolana"]
         ],
         "lekcje": lekcje,
     }
@@ -807,6 +809,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._dodatkowe: List[Dict[str, Any]] = []
         self.formularz: Dict[str, Any] = dict(FORMULARZ_DOMYSLNY)
         self.do_usuniecia: Optional[str] = None  # id lekcji wybranej do usuniecia
+        self.edytowana: Optional[str] = None  # id lekcji wczytanej do formularza w celu edycji
+        self.termin: Optional[str] = None  # klucz "id|data" terminu wybranego do odwolania/przywrocenia
         self._dodatkowe_store: Optional[Store] = (
             Store(hass, 1, f"{DOMAIN}_lekcje_dodatkowe_{config_entry.entry_id}")
             if config_entry is not None
@@ -917,19 +921,46 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             self.data = {**self.data, "plan": self._scal_plan(baza)}
         self.async_update_listeners()
 
+    def _znajdz_dodatkowa(self, id: str) -> Optional[Dict[str, Any]]:
+        return next((l for l in self._dodatkowe if l["id"] == id), None)
+
+    @staticmethod
+    def _klucz_duplikatu(l: Dict[str, Any]) -> tuple:
+        return (l["przedmiot"].lower(), l["od"], l["do"], l["powtarzanie"], l.get("dzien"), l.get("data"))
+
+    def _jest_duplikatem(self, rekord: Dict[str, Any]) -> bool:
+        return any(
+            l["id"] != rekord["id"] and self._klucz_duplikatu(l) == self._klucz_duplikatu(rekord)
+            for l in self._dodatkowe
+        )
+
+    async def _zapisz_i_przelicz(self) -> None:
+        await self._zapisz_dodatkowe()
+        self._przelicz_plan()
+
     async def async_dodaj_lekcje_dodatkowa(
         self, przedmiot: str, od: Any, do: Any, *, powtarzanie: str = LD.COTYGODNIOWO,
         dzien: Any = None, data: Any = None, miejsce: str = "",
     ) -> Dict[str, Any]:
         """Dodaj lekcje dodatkowa; ValueError z czytelnym komunikatem przy blednych danych."""
         rekord = LD.nowa_lekcja(przedmiot, od, do, powtarzanie=powtarzanie, dzien=dzien, data=data, miejsce=miejsce)
-        klucz = lambda l: (l["przedmiot"].lower(), l["od"], l["do"], l["powtarzanie"], l.get("dzien"), l.get("data"))
-        if any(klucz(l) == klucz(rekord) for l in self._dodatkowe):
+        if self._jest_duplikatem(rekord):
             raise ValueError("Takie zajęcia są już dodane")
         self._dodatkowe.append(rekord)
-        await self._zapisz_dodatkowe()
-        self._przelicz_plan()
+        await self._zapisz_i_przelicz()
         return rekord
+
+    async def async_edytuj_lekcje_dodatkowa(self, id: str, **pola: Any) -> Dict[str, Any]:
+        """Zmien wybrane pola lekcji dodatkowej (None = bez zmian); id i pasujace odwolane terminy zostaja."""
+        stara = self._znajdz_dodatkowa(id)
+        if stara is None:
+            raise ValueError("Nie ma takich zajęć dodatkowych")
+        nowa = LD.zmien(stara, **pola)
+        if self._jest_duplikatem(nowa):
+            raise ValueError("Takie zajęcia są już dodane")
+        self._dodatkowe = [nowa if l["id"] == id else l for l in self._dodatkowe]
+        await self._zapisz_i_przelicz()
+        return nowa
 
     async def async_usun_lekcje_dodatkowa(self, id: str) -> bool:
         """Usun lekcje dodatkowa po id; False, gdy takiej nie ma."""
@@ -939,16 +970,64 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._dodatkowe = pozostale
         if self.do_usuniecia == id:
             self.do_usuniecia = None
-        await self._zapisz_dodatkowe()
-        self._przelicz_plan()
+        if self.edytowana == id:
+            self.wyczysc_formularz()
+        if self.termin and self.termin.split("|")[0] == id:
+            self.termin = None
+        await self._zapisz_i_przelicz()
         return True
+
+    async def async_ustaw_odwolanie_terminu(self, id: str, data: Any, odwolana: bool = True) -> bool:
+        """Odwolaj (albo przywroc) jeden termin zajec dodatkowych; True, gdy cos sie zmienilo."""
+        l = self._znajdz_dodatkowa(id)
+        if l is None:
+            raise ValueError("Nie ma takich zajęć dodatkowych")
+        zmieniono = LD.ustaw_odwolanie(l, data, odwolana)
+        if zmieniono:
+            await self._zapisz_i_przelicz()
+        return zmieniono
+
+    def terminy_dodatkowych(self) -> List[Dict[str, Any]]:
+        return LD.terminy(self._dodatkowe, _dzis())
+
+    async def async_odwolaj_wybrany(self, odwolana: bool = True) -> bool:
+        """Odwolaj/przywroc termin wybrany na liscie "termin" (przyciski w planie)."""
+        if not self.termin or self.termin not in {t["klucz"] for t in self.terminy_dodatkowych()}:
+            raise ValueError("Wybierz termin zajęć")
+        id_, data = self.termin.split("|")
+        return await self.async_ustaw_odwolanie_terminu(id_, data, odwolana)
 
     def ustaw_formularz(self, pole: str, wartosc: Any) -> None:
         self.formularz[pole] = wartosc
         self.async_update_listeners()
 
+    def wyczysc_formularz(self) -> None:
+        """Przywroc wartosci poczatkowe formularza i wyjdz z trybu edycji."""
+        self.formularz = dict(FORMULARZ_DOMYSLNY)
+        self.edytowana = None
+        self.async_update_listeners()
+
+    def wczytaj_do_formularza(self, id: str) -> None:
+        """Wpisz pola wybranych zajec do formularza i przejdz w tryb edycji."""
+        l = self._znajdz_dodatkowa(id)
+        if l is None:
+            return
+        self.formularz = {
+            "przedmiot": l["przedmiot"],
+            "miejsce": l.get("miejsce", ""),
+            "powtarzanie": l["powtarzanie"],
+            "dzien": l["dzien"] if l["powtarzanie"] == LD.COTYGODNIOWO else FORMULARZ_DOMYSLNY["dzien"],
+            "data": date.fromisoformat(l["data"]) if l["powtarzanie"] == LD.JEDNORAZOWO else None,
+            "od": l["od"],
+            "do": l["do"],
+        }
+        self.edytowana = id
+        self.async_update_listeners()
+
     async def async_dodaj_z_formularza(self) -> Dict[str, Any]:
         """Dodaj lekcje z wartosci formularza (przycisk "Dodaj"); po sukcesie czysci nazwe i miejsce."""
+        if self.edytowana:
+            raise ValueError("Trwa edycja zajęć - użyj „Zapisz zmiany” albo wybierz „nowe zajęcia”")
         f = self.formularz
         rekord = await self.async_dodaj_lekcje_dodatkowa(
             f["przedmiot"], f["od"], f["do"], powtarzanie=f["powtarzanie"],
@@ -957,6 +1036,21 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self.formularz["przedmiot"] = ""
         self.formularz["miejsce"] = ""
         self.async_update_listeners()
+        return rekord
+
+    async def async_zapisz_z_formularza(self) -> Dict[str, Any]:
+        """Zapisz zmiany wczytanych do formularza zajec (przycisk "Zapisz zmiany"); potem czysci formularz."""
+        if not self.edytowana:
+            raise ValueError("Najpierw wybierz zajęcia do edycji")
+        f = self.formularz
+        # przy zajeciach cotygodniowych data z formularza jest bez znaczenia (i odwrotnie dzien)
+        rekord = await self.async_edytuj_lekcje_dodatkowa(
+            self.edytowana, przedmiot=f["przedmiot"], od=f["od"], do=f["do"], powtarzanie=f["powtarzanie"],
+            dzien=f["dzien"] if f["powtarzanie"] == LD.COTYGODNIOWO else None,
+            data=f["data"] if f["powtarzanie"] == LD.JEDNORAZOWO else None,
+            miejsce=f["miejsce"] or "",
+        )
+        self.wyczysc_formularz()
         return rekord
 
     async def async_usun_wybrana(self) -> bool:
