@@ -6,7 +6,7 @@ import json
 import logging
 import re
 import traceback
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Dict, Any
 
 import voluptuous as vol
@@ -21,7 +21,7 @@ from librus_apix.exceptions import TokenError
 
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, SCAN_INTERVAL
+from .const import BRAK_DOSTEPU_CZAS, DOMAIN, SCAN_INTERVAL
 from .coordinator import (
     LibrusDataUpdateCoordinator,
     UWZGLEDNIJ_OCENY_OPISOWE,
@@ -114,6 +114,17 @@ def _oceny_z_html(html: str, semestr: int) -> list:
             "desc": f"Ocena: {ocena}\nPrzedmiot: {przedmiot}\n" + "\n".join(linie),
         })
     return wynik
+
+
+def _zachowanie_z_html(html: str) -> dict:
+    """Zachowanie (oceny i wpisy) z tej samej strony ocen; blad parsera nigdy nie psuje ocen."""
+    from .uwagi import parsuj_zachowanie, puste_zachowanie
+
+    try:
+        return parsuj_zachowanie(html)
+    except Exception as ex:
+        _LOGGER.warning("Nie udalo sie odczytac zachowania ze strony ocen: %s", ex)
+        return puste_zachowanie()
 
 
 def _tylko_nowe_oceny(znane: list, kandydaci: list) -> list:
@@ -590,6 +601,8 @@ class LibrusApiClient:
         self._token = None
         self._auth_lock = asyncio.Lock()
         self._ostatnia_strona_ocen = ""
+        self._ostatnia_strona_uwag = ""
+        self._brak_dostepu: Dict[str, datetime] = {}  # modul -> kiedy stwierdzono brak dostepu
 
     def _reset_auth(self) -> None:
         """Reset authentication state to force re-authentication on next call."""
@@ -611,6 +624,70 @@ class LibrusApiClient:
                 _LOGGER.error("Authentication failed: %s\n%s", ex, traceback.format_exc())
                 self._reset_auth()
                 return False
+
+    def _modul_zablokowany(self, modul: str) -> bool:
+        """True, jesli konto nie ma dostepu do modulu (stwierdzone mniej niz BRAK_DOSTEPU_CZAS temu)."""
+        od = self._brak_dostepu.get(modul)
+        return od is not None and dt_util.utcnow() - od < BRAK_DOSTEPU_CZAS
+
+    async def _kontrola_dostepu(self, modul: str) -> bool:
+        """Rozstrzygnij, czy TokenError oznacza brak dostepu do modulu, a nie wygasla sesje.
+
+        librus-apix rzuca ten sam TokenError dla wygaslego tokenu i dla strony "Brak dostepu".
+        Zapytanie kontrolne (dane ucznia) na swiezej sesji: jesli przechodzi, sesja jest dobra,
+        a modul niedostepny dla konta - wtedy zapamietujemy to na BRAK_DOSTEPU_CZAS i nie
+        logujemy sie ponownie co odswiezenie. True = modul zablokowany.
+        """
+        try:
+            if not self._client or not self._token:
+                if not await self.async_authenticate():
+                    return False
+            from librus_apix.student_information import get_student_information
+
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, get_student_information, self._client)
+        except Exception:
+            return False
+        self._brak_dostepu[modul] = dt_util.utcnow()
+        _LOGGER.info("Brak dostepu do modulu %s - pomijam go przez %s", modul, BRAK_DOSTEPU_CZAS)
+        return True
+
+    async def async_get_remarks(self):
+        """Uwagi i pochwaly: {"uwagi": [...], "nierozpoznany_uklad": bool, "dostepne": bool} albo None.
+
+        Modul "Uwagi" bywa wylaczony dla konta. Wtedy wynik to pusta lista z dostepne=False,
+        a kolejne proby sa wstrzymane na BRAK_DOSTEPU_CZAS (bez przelogowywania co cykl).
+        """
+        from .uwagi import pobierz_uwagi
+
+        brak = {"uwagi": [], "nierozpoznany_uklad": False, "dostepne": False}
+        if self._modul_zablokowany("uwagi"):
+            return brak
+        for attempt in range(2):
+            try:
+                if not self._client or not self._token:
+                    if not await self.async_authenticate():
+                        return None
+                loop = asyncio.get_running_loop()
+                uwagi, nierozpoznany, html = await loop.run_in_executor(None, pobierz_uwagi, self._client)
+                self._ostatnia_strona_uwag = html  # do diagnostyki
+                if nierozpoznany:
+                    _LOGGER.warning(
+                        "Strona uwag ma nieznany uklad - nie odczytano zadnej uwagi "
+                        "(usluga librus_apix.diagnostyka_ocen zapisze jej HTML)"
+                    )
+                return {"uwagi": uwagi, "nierozpoznany_uklad": nierozpoznany, "dostepne": True}
+            except TokenError:
+                _LOGGER.debug("Token expired fetching remarks (attempt %d/2), re-authenticating...", attempt + 1)
+                self._reset_auth()
+                if attempt == 1:
+                    if await self._kontrola_dostepu("uwagi"):
+                        return brak
+                    return None
+            except Exception as ex:  # opcjonalne dane: blad nie resetuje sesji
+                _LOGGER.warning("Failed to get remarks: %s", ex)
+                _LOGGER.debug("Traceback (remarks):\n%s", traceback.format_exc())
+                return None
 
     async def async_get_grades(self):
         """Get grades from Librus: {"oceny": [...], "srednie_librus": {...}} albo None.
@@ -726,7 +803,11 @@ class LibrusApiClient:
                 if wynik_biblioteki is None and not all_grades and blad is not None:
                     raise blad
 
-                return {"oceny": all_grades, "srednie_librus": srednie_librus}
+                return {
+                    "oceny": all_grades,
+                    "srednie_librus": srednie_librus,
+                    "zachowanie": _zachowanie_z_html(html),
+                }
 
             except TokenError as ex:
                 _LOGGER.warning(
@@ -1064,6 +1145,7 @@ _USLUGI = {
     "przegladaj_zadania": ("async_przegladaj_zadania", "kierunek", _KIERUNKI),
     "przegladaj_oceny": ("async_przegladaj_oceny", "kierunek", _KIERUNKI),
     "przegladaj_frekwencje": ("async_przegladaj_frekwencje", "kierunek", _KIERUNKI),
+    "przegladaj_uwagi": ("async_przegladaj_uwagi", "kierunek", _KIERUNKI),
     "przegladaj_plan": ("async_przegladaj_plan", "kierunek", ["nastepny", "poprzedni", "biezacy"]),
 }
 
@@ -1103,12 +1185,17 @@ def _zarejestruj_uslugi(hass: HomeAssistant) -> None:
 
             strona = getattr(coordinator.client, "_ostatnia_strona_ocen", "") or ""
             sciezka_html = hass.config.path("librus_apix_strona_ocen.html")
+            strona_uwag = getattr(coordinator.client, "_ostatnia_strona_uwag", "") or ""
+            sciezka_uwag = hass.config.path("librus_apix_strona_uwag.html")
 
             def _zapisz() -> None:
                 with open(sciezka, "w", encoding="utf-8") as plik:
                     plik.write(raport)
                 with open(sciezka_html, "w", encoding="utf-8") as plik:
                     plik.write(strona)
+                if strona_uwag:
+                    with open(sciezka_uwag, "w", encoding="utf-8") as plik:
+                        plik.write(strona_uwag)
 
             await hass.async_add_executor_job(_zapisz)
             _LOGGER.warning("Raport diagnostyczny ocen zapisano w %s", sciezka)

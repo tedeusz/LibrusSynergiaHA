@@ -51,6 +51,7 @@ from .coordinator import (
 _LOGGER = logging.getLogger(__name__)
 
 MAX_OGLOSZEN_W_ATRYBUTACH = 60
+MAX_UWAG_W_ATRYBUTACH = 30
 
 
 async def async_setup_entry(
@@ -77,6 +78,8 @@ async def async_setup_entry(
         LibrusFrekwencjaSensor(coordinator, config_entry),
         LibrusNieobecnosciSensor(coordinator, config_entry),
         LibrusOgloszeniaSensor(coordinator, config_entry),
+        LibrusUwagiSensor(coordinator, config_entry),
+        LibrusZachowanieSensor(coordinator, config_entry),
         LibrusTematyLekcjiSensor(coordinator, config_entry),
         LibrusCzasLekcjiSensor(coordinator, config_entry, "poczatek", "dzis"),
         LibrusCzasLekcjiSensor(coordinator, config_entry, "koniec", "dzis"),
@@ -785,6 +788,98 @@ class LibrusOgloszeniaSensor(_LibrusSensor):
             "przegladanie": (
                 lambda w: {**w, "ogloszenia": [{**o, "tresc": o["tresc"][:600]} for o in w["ogloszenia"]]}
             )(self.coordinator.widok_ogloszen()),
+        }
+
+
+def _uwaga_kompakt(u: Dict[str, Any]) -> Dict[str, Any]:
+    """Uwaga do atrybutow sensora (tresc skrocona, zeby atrybuty mieszcza sie w limicie HA)."""
+    return {**u, "tresc": u["tresc"][:500]}
+
+
+class LibrusUwagiSensor(_LibrusSensor):
+    """Uwagi i pochwaly z dziennika (stan = liczba wpisow na liscie Librusa)."""
+
+    _unrecorded_attributes = frozenset({"uwagi", "ostatnia", "przegladanie"})
+
+    def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "Uwagi", "uwagi", "mdi:clipboard-alert-outline")
+
+    @property
+    def native_value(self) -> Optional[int]:
+        if "uwagi" not in self._data:
+            return None
+        return len(self._data["uwagi"])
+
+    @property
+    def extra_state_attributes(self) -> Dict[str, Any]:
+        lista = self._data.get("uwagi", [])
+        stan = self._data.get("uwagi_stan", {})
+        wg_znaku: Dict[str, int] = {}
+        for u in lista:
+            wg_znaku[u["znak"]] = wg_znaku.get(u["znak"], 0) + 1
+        return {
+            # False = konto nie ma modulu Uwagi (sensor pokazuje wtedy 0)
+            "dostepne": stan.get("dostepne", True),
+            # True = strona uwag ma nieznany uklad, wiec lista moze byc nieaktualna
+            "nierozpoznany_uklad": stan.get("nierozpoznany_uklad", False),
+            "liczba_negatywnych": wg_znaku.get("negatywna", 0),
+            "liczba_pozytywnych": wg_znaku.get("pozytywna", 0),
+            "liczba_neutralnych": wg_znaku.get("neutralna", 0),
+            "sa_nowe": any(u.get("jest_nowa") for u in lista),
+            "ostatnia": _uwaga_kompakt(lista[0]) if lista else None,
+            "uwagi": [_uwaga_kompakt(u) for u in lista[:MAX_UWAG_W_ATRYBUTACH]],
+            # Aktualny ekran przegladania (usluga librus_apix.przegladaj_uwagi) - cala lista
+            "przegladanie": (
+                lambda w: {**w, "uwagi": [_uwaga_kompakt(u) for u in w["uwagi"]]}
+            )(self.coordinator.widok_uwag()),
+        }
+
+
+class LibrusZachowanieSensor(_LibrusSensor):
+    """Ocena zachowania (roczna, a gdy jej nie ma - z okresu 2 albo 1) oraz wpisy pozytywne i negatywne."""
+
+    _unrecorded_attributes = frozenset({"wpisy"})
+
+    def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "Zachowanie", "zachowanie", "mdi:emoticon-outline")
+
+    def _biezaca(self) -> Optional[Dict[str, Any]]:
+        zach = self._data.get("zachowanie")
+        if not zach:
+            return None
+        for klucz in ("roczna", "okres_2", "okres_1"):
+            if zach[klucz]["ocena"]:
+                return {"okres": klucz, **zach[klucz]}
+        return None
+
+    @property
+    def native_value(self) -> Optional[str]:
+        if "zachowanie" not in self._data:
+            return None
+        biezaca = self._biezaca()
+        return biezaca["ocena"] if biezaca else "brak"
+
+    @property
+    def extra_state_attributes(self) -> Dict[str, Any]:
+        zach = self._data.get("zachowanie")
+        if not zach:
+            return {}
+        biezaca = self._biezaca()
+        wpisy = sorted(
+            zach["wpisy"],
+            key=lambda w: (lambda d: (d is None, -d.toordinal() if d else 0))(_parse_date(w["data"])),
+        )
+        return {
+            "znaleziono": zach["znaleziono"],
+            "okres_1": zach["okres_1"],
+            "okres_2": zach["okres_2"],
+            "roczna": zach["roczna"],
+            "ocena_biezaca_okres": biezaca["okres"] if biezaca else None,
+            "ocena_jest_propozycja": biezaca["propozycja"] if biezaca else False,
+            "liczba_pozytywnych": sum(1 for w in wpisy if w["rodzaj"] == "pozytywne"),
+            "liczba_negatywnych": sum(1 for w in wpisy if w["rodzaj"] == "negatywne"),
+            "sa_nowe": any(w.get("jest_nowy") for w in wpisy),
+            "wpisy": wpisy,
         }
 
 

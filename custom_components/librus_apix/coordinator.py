@@ -16,6 +16,7 @@ from homeassistant.helpers.update_coordinator import (
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, SCAN_INTERVAL
+from .uwagi import puste_zachowanie
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -614,6 +615,32 @@ def _zdarzenie_id(zdarzenie: Dict[str, Any]) -> Any:
 # --- Ogloszenia i tematy lekcji ---------------------------------------------------
 
 
+def _build_uwagi(raw: Optional[Dict[str, Any]], prev: Dict[str, Any]) -> Dict[str, Any]:
+    """Wynik klienta (async_get_remarks) -> {"uwagi": lista, "uwagi_stan": {...}}.
+
+    Przy bledzie pobierania (None) zostaja poprzednie dane. Strona o nieznanym ukladzie
+    (nic nie odczytano, brak napisu "Brak uwag") nie moze skasowac wczesniej odczytanych uwag.
+    """
+    stare = prev.get("uwagi", [])
+    stary_stan = prev.get("uwagi_stan", {"dostepne": True, "nierozpoznany_uklad": False})
+    if raw is None:
+        return {"uwagi": stare, "uwagi_stan": stary_stan}
+    stan = {"dostepne": raw["dostepne"], "nierozpoznany_uklad": raw["nierozpoznany_uklad"]}
+    if raw["nierozpoznany_uklad"] and stare:
+        return {"uwagi": stare, "uwagi_stan": stan}
+    return {
+        "uwagi": [{**u, "jest_nowa": _jest_nowa(u["data"])} for u in raw["uwagi"]],
+        "uwagi_stan": stan,
+    }
+
+
+def _build_zachowanie(raw: Optional[Dict[str, Any]], prev: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Zachowanie ze strony ocen; gdy brak wiersza (albo blad), zostaje poprzednia wartosc."""
+    if raw is None or not raw.get("znaleziono"):
+        return prev if prev and prev.get("znaleziono") else (raw or puste_zachowanie())
+    return {**raw, "wpisy": [{**w, "jest_nowy": _jest_nowa(w["data"])} for w in raw["wpisy"]]}
+
+
 def _build_ogloszenia(raw: Any) -> List[Dict[str, Any]]:
     """Lista Announcement -> lista slownikow (kolejnosc jak w Librusie)."""
     wynik = []
@@ -728,6 +755,8 @@ EVENT_NOWE_ZADANIE = f"{DOMAIN}_nowe_zadanie"
 EVENT_NOWE_ZDARZENIE = f"{DOMAIN}_nowe_zdarzenie"
 EVENT_NOWA_NIEOBECNOSC = f"{DOMAIN}_nowa_nieobecnosc"
 EVENT_NOWE_OGLOSZENIE = f"{DOMAIN}_nowe_ogloszenie"
+EVENT_NOWA_UWAGA = f"{DOMAIN}_nowa_uwaga"
+EVENT_NOWY_WPIS_ZACHOWANIA = f"{DOMAIN}_nowy_wpis_zachowania"
 
 
 class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
@@ -743,6 +772,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._seen_homework_ids: set = set()
         self._seen_schedule_ids: set = set()
         self._seen_attendance_ids: set = set()
+        self._seen_uwagi_ids: set = set()
+        self._seen_zachowanie_ids: set = set()
         self._api_lock = asyncio.Lock()
         self._tresci: Dict[str, str] = {}
         self._otwarta: Optional[Dict[str, Any]] = None
@@ -756,6 +787,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._zad_przesuniecie = 0
         self._oceny_przesuniecie = 0
         self._frek_przesuniecie = 0
+        self._uwagi_przesuniecie = 0
         self._plan_tydzien = 0  # przesuniecie widoku planu w tygodniach (0 = biezacy tydzien szkolny)
         self._plan_dodatkowy: Dict[str, List[Dict[str, Any]]] = {}  # dni spoza danych bazowych
         self._tresci_store: Optional[Store] = (
@@ -1017,6 +1049,39 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self.async_update_listeners()
         return True
 
+    def widok_uwag(self) -> Dict[str, Any]:
+        """Ekran uwag (ROZMIAR_WIDOKU sztuk) z calej listy; pozycje liczone od 1."""
+        lista = (self.data or {}).get("uwagi") or []
+        przes = min(self._uwagi_przesuniecie, max(0, len(lista) - 1))
+        czesc = lista[przes : przes + ROZMIAR_WIDOKU]
+        return {
+            "od": przes + 1 if czesc else 0,
+            "do": przes + len(czesc),
+            "razem": len(lista),
+            "najnowsze": przes == 0,
+            "uwagi": czesc,
+        }
+
+    def async_przegladaj_uwagi(self, kierunek: str) -> bool:
+        """Przesun ekran uwag: "nastepna" (starsze), "poprzednia" (nowsze), "najnowsze"; bez zapytan."""
+        lista = (self.data or {}).get("uwagi") or []
+        przes = min(self._uwagi_przesuniecie, max(0, len(lista) - 1))
+        if kierunek == "najnowsze":
+            nowe = 0
+        elif kierunek == "nastepna":
+            nowe = przes + ROZMIAR_WIDOKU
+            if nowe >= len(lista):
+                return False
+        elif kierunek == "poprzednia":
+            if przes == 0:
+                return False
+            nowe = max(0, przes - ROZMIAR_WIDOKU)
+        else:
+            return False
+        self._uwagi_przesuniecie = nowe
+        self.async_update_listeners()
+        return True
+
     def widok_ogloszen(self) -> Dict[str, Any]:
         """Ekran ogloszen (ROZMIAR_WIDOKU sztuk) z calej listy; pozycje liczone od 1."""
         lista = (self.data or {}).get("ogloszenia") or []
@@ -1202,6 +1267,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 homework_raw = await self.client.async_get_homework()
                 schedule_raw = await self.client.async_get_schedule()
                 ogloszenia_raw = await self.client.async_get_announcements()
+                uwagi_raw = await self.client.async_get_remarks()
 
                 nowe = dict(self.data)
                 grades = grades_raw["oceny"] if grades_raw else None
@@ -1211,6 +1277,9 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                     nowe["oceny"] = grades
                     nowe["oceny_wg_przedmiotu"] = self._grupuj_oceny(grades)
                     nowe["srednie_librus"] = _build_srednie_librus(grades_raw["srednie_librus"])
+                    nowe["zachowanie"] = _build_zachowanie(grades_raw.get("zachowanie"), self.data.get("zachowanie"))
+                if uwagi_raw is not None:
+                    nowe.update(_build_uwagi(uwagi_raw, self.data))
                 if attendance_raw is not None:
                     nowe["obecnosc"] = _build_obecnosc(attendance_raw)
                 if homework_raw is not None:
@@ -1231,6 +1300,10 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 self._fire_attendance_events(nowe["obecnosc"])
             if ogloszenia_raw is not None:
                 self._fire_ogloszenia_events(nowe["ogloszenia"])
+            if uwagi_raw is not None:
+                self._fire_uwagi_events(nowe["uwagi"])
+            if grades is not None:
+                self._fire_zachowanie_events(nowe["zachowanie"])
             self._zastosuj_czesciowe(nowe)
         except Exception as err:  # nigdy nie psuj reszty integracji
             _LOGGER.warning("Odswiezanie zdarzen (oceny, zadania itd.) nie powiodlo sie: %s", err)
@@ -1284,6 +1357,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             frequency_raw = await self.client.async_get_attendance_frequency()
             ogloszenia_raw = await self.client.async_get_announcements()
             tematy_raw = await self.client.async_get_completed_lessons()
+            uwagi_raw = await self.client.async_get_remarks()
 
             # Dane opcjonalne: przy bledzie pobierania zostaja poprzednie
             prev = self.data or {}
@@ -1316,6 +1390,10 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                     if grades_raw
                     else prev.get("srednie_librus", {})
                 ),
+                "zachowanie": _build_zachowanie(
+                    grades_raw.get("zachowanie") if grades_raw else None, prev.get("zachowanie")
+                ),
+                **_build_uwagi(uwagi_raw, prev),
             }
 
             if grades is None:
@@ -1384,6 +1462,10 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                     self._seen_attendance_ids.add(self._attendance_id(wpis))
                 for o in ogloszenia:
                     self._seen_announcement_ids.add((o["tytul"], o["data"], o["autor"]))
+                for u in dodatkowe["uwagi"]:
+                    self._seen_uwagi_ids.add(u["id"])
+                for w in dodatkowe["zachowanie"]["wpisy"]:
+                    self._seen_zachowanie_ids.add(w["id"])
             else:
                 await self._dociagnij_tresci(wiadomosci)
                 self._fire_events(wiadomosci, grades)
@@ -1391,6 +1473,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 self._fire_schedule_events(terminarz)
                 self._fire_attendance_events(obecnosc)
                 self._fire_ogloszenia_events(ogloszenia)
+                self._fire_uwagi_events(dodatkowe["uwagi"])
+                self._fire_zachowanie_events(dodatkowe["zachowanie"])
 
             return result
 
@@ -1504,6 +1588,44 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                     "autor": o["autor"],
                     "data": o["data"],
                     "tresc": o["tresc"][:500],
+                },
+            )
+
+    def _fire_uwagi_events(self, uwagi: List[Dict]) -> None:
+        """Wyslij zdarzenia HA dla nowych uwag i pochwal."""
+        for u in uwagi:
+            if u["id"] in self._seen_uwagi_ids:
+                continue
+            self._seen_uwagi_ids.add(u["id"])
+            _LOGGER.debug("Nowa uwaga: %s %s", u["data"], u["znak"])
+            self.hass.bus.fire(
+                EVENT_NOWA_UWAGA,
+                {
+                    "data": u["data"],
+                    "nauczyciel": u["nauczyciel"],
+                    "rodzaj": u["rodzaj"],
+                    "znak": u["znak"],
+                    "kategoria": u["kategoria"],
+                    "tresc": u["tresc"][:500],
+                },
+            )
+
+    def _fire_zachowanie_events(self, zachowanie: Dict[str, Any]) -> None:
+        """Wyslij zdarzenia HA dla nowych wpisow o zachowaniu (pozytywnych i negatywnych)."""
+        for w in zachowanie.get("wpisy", []):
+            if w["id"] in self._seen_zachowanie_ids:
+                continue
+            self._seen_zachowanie_ids.add(w["id"])
+            _LOGGER.debug("Nowy wpis zachowania: %s %s", w["data"], w["rodzaj"])
+            self.hass.bus.fire(
+                EVENT_NOWY_WPIS_ZACHOWANIA,
+                {
+                    "okres": w["okres"],
+                    "ocena": w["ocena"],
+                    "rodzaj": w["rodzaj"],
+                    "data": w["data"],
+                    "nauczyciel": w["nauczyciel"],
+                    "komentarz": w["komentarz"][:500],
                 },
             )
 
