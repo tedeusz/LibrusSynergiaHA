@@ -1141,6 +1141,7 @@ _USLUGI = {
     "pobierz_tresc": ("async_pobierz_tresc", "indeks", None),
     "przegladaj": ("async_przegladaj", "kierunek", _KIERUNKI),
     "przegladaj_ogloszenia": ("async_przegladaj_ogloszenia", "kierunek", _KIERUNKI),
+    "otworz_ogloszenie": ("async_otworz_ogloszenie", "indeks", None),
     "przegladaj_terminarz": ("async_przegladaj_terminarz", "kierunek", _KIERUNKI),
     "przegladaj_zadania": ("async_przegladaj_zadania", "kierunek", _KIERUNKI),
     "przegladaj_oceny": ("async_przegladaj_oceny", "kierunek", _KIERUNKI),

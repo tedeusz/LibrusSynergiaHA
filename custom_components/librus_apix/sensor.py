@@ -817,7 +817,7 @@ class LibrusNieobecnosciSensor(_LibrusSensor):
 class LibrusOgloszeniaSensor(_LibrusSensor):
     """Ogloszenia szkoly (stan = liczba ogloszen na liscie Librusa)."""
 
-    _unrecorded_attributes = frozenset({"ogloszenia", "przegladanie"})
+    _unrecorded_attributes = frozenset({"ogloszenia", "przegladanie", "otwarte"})
 
     def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
         super().__init__(coordinator, config_entry, "Ogloszenia", "ogloszenia", "mdi:bullhorn")
@@ -839,6 +839,8 @@ class LibrusOgloszeniaSensor(_LibrusSensor):
             ],
             # Aktualny ekran przegladania (usluga librus_apix.przegladaj_ogloszenia) - cala lista
             "przegladanie": self.coordinator.widok_ogloszen(),  # pelne tresci (kilka pozycji na ekran)
+            # Ostatnio kliknięte ogloszenie z cala trescia - usluga librus_apix.otworz_ogloszenie
+            "otwarte": self.coordinator._ogl_otwarte or {},
         }
 
 

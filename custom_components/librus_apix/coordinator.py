@@ -800,6 +800,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._przesuniecie = 0
         self._widok_lista: Optional[List[Dict[str, Any]]] = None
         self._ogl_przesuniecie = 0
+        self._ogl_otwarte: Optional[Dict[str, Any]] = None  # ogloszenie kliknięte na liscie (cala tresc)
         self._term_przesuniecie = 0
         self._zad_przesuniecie = 0
         self._oceny_przesuniecie = 0
@@ -1280,6 +1281,16 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         else:
             return False
         self._uwagi_przesuniecie = nowe
+        self.async_update_listeners()
+        return True
+
+    def async_otworz_ogloszenie(self, indeks: int) -> bool:
+        """Pokaz cala tresc ogloszenia z pozycji `indeks` biezacego ekranu (0 = pierwsze); bez zapytan do Librusa."""
+        lista = self.widok_ogloszen()["ogloszenia"]
+        if not 0 <= indeks < len(lista):
+            _LOGGER.warning("Brak ogloszenia na pozycji %s", indeks)
+            return False
+        self._ogl_otwarte = dict(lista[indeks])
         self.async_update_listeners()
         return True
 

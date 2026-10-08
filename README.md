@@ -80,7 +80,8 @@ Usługi przesuwają ekran listy (atrybut `przegladanie` odpowiedniego sensora) i
 |--------|------|
 | `librus_apix.przegladaj` | Lista wiadomości (przechodzi też do starszych stron Librusa) |
 | `librus_apix.pobierz_tresc` | Pobiera i zapisuje treść wiadomości z podanej pozycji listy (`indeks`) |
-| `librus_apix.przegladaj_ogloszenia` | Lista ogłoszeń |
+| `librus_apix.przegladaj_ogloszenia` | Lista ogłoszeń (ekran po 5 pozycji) |
+| `librus_apix.otworz_ogloszenie` | Pokazuje pełną treść ogłoszenia z pozycji `indeks` bieżącego ekranu (atrybut `otwarte` czujnika ogłoszeń; bez zapytań do Librusa) |
 | `librus_apix.przegladaj_terminarz` | Kolejne dni ze zdarzeniami w terminarzu |
 | `librus_apix.przegladaj_zadania` | Kolejne dni z zadaniami domowymi |
 | `librus_apix.przegladaj_oceny` | Lista ostatnich ocen |

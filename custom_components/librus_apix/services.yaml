@@ -63,6 +63,25 @@ przegladaj_ogloszenia:
       selector:
         text:
 
+otworz_ogloszenie:
+  name: Otwórz ogłoszenie
+  description: Pokazuje pełną treść ogłoszenia z podanej pozycji bieżącego ekranu listy (bez zapytań do Librusa).
+  fields:
+    indeks:
+      name: Pozycja na ekranie
+      description: Numer ogłoszenia na wyświetlanej liście (0 = pierwsze).
+      required: true
+      example: 0
+      selector:
+        number:
+          min: 0
+          max: 50
+    config_entry_id:
+      name: Wpis integracji
+      required: false
+      selector:
+        text:
+
 przegladaj_terminarz:
   name: Przeglądaj terminarz
   description: Przesuwa ekran terminarza o 5 dni ze zdarzeniami (bez zapytań do Librusa).

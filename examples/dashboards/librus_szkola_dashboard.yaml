@@ -4,50 +4,117 @@ views:
     path: szkola
     icon: mdi:school
     cards:
-      - type: markdown
-        title: 📢 Ogłoszenia
-        content: |-
-          {%- set p = state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {} -%}
-          {%- set lista = p.ogloszenia or [] -%}
-          {%- if not lista -%}
-          Brak ogłoszeń.
-          {%- else -%}
-          _Pozycje {{ p.od }}–{{ p.do }} z {{ p.razem }}{{ ' (najnowsze)' if p.najnowsze else '' }}_
-          {%- for o in lista %}
-
-          {{ '🆕 ' if o.jest_nowe else '' }}**{{ o.tytul }}** · {{ o.data }} · _{{ o.autor }}_
-
-          {{ o.tresc | replace('\r', ' ') | replace('\n', ' ') | truncate(250) }}
-
-          ---
-          {%- endfor %}
-          {%- endif -%}
-      - type: horizontal-stack
+      # Ogłoszenia: lista jak przy wiadomościach - kliknij pozycję, a pełna treść pokaże się na dole
+      - type: vertical-stack
         cards:
+          - type: custom:mushroom-title-card
+            title: 📢 Ogłoszenia
+            subtitle: >
+              {% set p = state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {} %}
+              {% if p.razem %}Pozycje {{ p.od }}–{{ p.do }} z {{ p.razem }}{{ ' (najnowsze)' if p.najnowsze else '' }}{% else %}Brak ogłoszeń{% endif %}
           - type: custom:mushroom-template-card
-            primary: Nowsze
-            icon: mdi:chevron-left
-            layout: vertical
+            primary: >
+              {% set o = ((state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {}).ogloszenia or [])[0] | default({}) %}{{ o.tytul | default('— brak —') }}
+            secondary: >
+              {% set o = ((state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {}).ogloszenia or [])[0] | default({}) %}{{ o.autor | default('') }}{% if o.data %} · {{ o.data }}{% endif %}
+            icon: mdi:bullhorn
+            icon_color: >
+              {% set o = ((state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {}).ogloszenia or [])[0] | default({}) %}{% if o.jest_nowe %}red{% else %}grey{% endif %}
             tap_action:
               action: perform-action
-              perform_action: librus_apix.przegladaj_ogloszenia
+              perform_action: librus_apix.otworz_ogloszenie
               data:
-                kierunek: poprzednia
+                indeks: 0
           - type: custom:mushroom-template-card
-            primary: Najnowsze
-            icon: mdi:page-first
-            layout: vertical
+            primary: >
+              {% set o = ((state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {}).ogloszenia or [])[1] | default({}) %}{{ o.tytul | default('— brak —') }}
+            secondary: >
+              {% set o = ((state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {}).ogloszenia or [])[1] | default({}) %}{{ o.autor | default('') }}{% if o.data %} · {{ o.data }}{% endif %}
+            icon: mdi:bullhorn
+            icon_color: >
+              {% set o = ((state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {}).ogloszenia or [])[1] | default({}) %}{% if o.jest_nowe %}red{% else %}grey{% endif %}
             tap_action:
               action: perform-action
-              perform_action: librus_apix.przegladaj_ogloszenia
+              perform_action: librus_apix.otworz_ogloszenie
               data:
-                kierunek: najnowsze
+                indeks: 1
           - type: custom:mushroom-template-card
-            primary: Starsze
-            icon: mdi:chevron-right
-            layout: vertical
+            primary: >
+              {% set o = ((state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {}).ogloszenia or [])[2] | default({}) %}{{ o.tytul | default('— brak —') }}
+            secondary: >
+              {% set o = ((state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {}).ogloszenia or [])[2] | default({}) %}{{ o.autor | default('') }}{% if o.data %} · {{ o.data }}{% endif %}
+            icon: mdi:bullhorn
+            icon_color: >
+              {% set o = ((state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {}).ogloszenia or [])[2] | default({}) %}{% if o.jest_nowe %}red{% else %}grey{% endif %}
             tap_action:
               action: perform-action
-              perform_action: librus_apix.przegladaj_ogloszenia
+              perform_action: librus_apix.otworz_ogloszenie
               data:
-                kierunek: nastepna
+                indeks: 2
+          - type: custom:mushroom-template-card
+            primary: >
+              {% set o = ((state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {}).ogloszenia or [])[3] | default({}) %}{{ o.tytul | default('— brak —') }}
+            secondary: >
+              {% set o = ((state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {}).ogloszenia or [])[3] | default({}) %}{{ o.autor | default('') }}{% if o.data %} · {{ o.data }}{% endif %}
+            icon: mdi:bullhorn
+            icon_color: >
+              {% set o = ((state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {}).ogloszenia or [])[3] | default({}) %}{% if o.jest_nowe %}red{% else %}grey{% endif %}
+            tap_action:
+              action: perform-action
+              perform_action: librus_apix.otworz_ogloszenie
+              data:
+                indeks: 3
+          - type: custom:mushroom-template-card
+            primary: >
+              {% set o = ((state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {}).ogloszenia or [])[4] | default({}) %}{{ o.tytul | default('— brak —') }}
+            secondary: >
+              {% set o = ((state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {}).ogloszenia or [])[4] | default({}) %}{{ o.autor | default('') }}{% if o.data %} · {{ o.data }}{% endif %}
+            icon: mdi:bullhorn
+            icon_color: >
+              {% set o = ((state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'przegladanie') or {}).ogloszenia or [])[4] | default({}) %}{% if o.jest_nowe %}red{% else %}grey{% endif %}
+            tap_action:
+              action: perform-action
+              perform_action: librus_apix.otworz_ogloszenie
+              data:
+                indeks: 4
+          - type: horizontal-stack
+            cards:
+              - type: custom:mushroom-template-card
+                primary: Nowsze
+                icon: mdi:chevron-left
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_ogloszenia
+                  data:
+                    kierunek: poprzednia
+              - type: custom:mushroom-template-card
+                primary: Najnowsze
+                icon: mdi:page-first
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_ogloszenia
+                  data:
+                    kierunek: najnowsze
+              - type: custom:mushroom-template-card
+                primary: Starsze
+                icon: mdi:chevron-right
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_ogloszenia
+                  data:
+                    kierunek: nastepna
+          - type: markdown
+            title: 📖 Treść ogłoszenia
+            content: |
+              {%- set o = state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'otwarte') or {} -%}
+              {%- if o.tytul -%}
+              ### {{ o.tytul }}
+              _{{ o.autor }} · {{ o.data }}_
+
+              {{ o.tresc | replace('\r', '') | replace('\n', '  \n') }}
+              {%- else -%}
+              _Kliknij ogłoszenie na liście powyżej, aby zobaczyć jego pełną treść. Przyciskami przejdziesz do starszych._
+              {%- endif -%}
