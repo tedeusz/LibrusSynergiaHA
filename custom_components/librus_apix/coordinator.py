@@ -810,7 +810,6 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self.formularz: Dict[str, Any] = dict(FORMULARZ_DOMYSLNY)
         self.do_usuniecia: Optional[str] = None  # id lekcji wybranej do usuniecia
         self.edytowana: Optional[str] = None  # id lekcji wczytanej do formularza w celu edycji
-        self.termin: Optional[str] = None  # klucz "id|data" terminu wybranego do odwolania/przywrocenia
         self._dodatkowe_store: Optional[Store] = (
             Store(hass, 1, f"{DOMAIN}_lekcje_dodatkowe_{config_entry.entry_id}")
             if config_entry is not None
@@ -972,8 +971,6 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             self.do_usuniecia = None
         if self.edytowana == id:
             self.wyczysc_formularz()
-        if self.termin and self.termin.split("|")[0] == id:
-            self.termin = None
         await self._zapisz_i_przelicz()
         return True
 
@@ -989,13 +986,6 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
 
     def terminy_dodatkowych(self) -> List[Dict[str, Any]]:
         return LD.terminy(self._dodatkowe, _dzis())
-
-    async def async_odwolaj_wybrany(self, odwolana: bool = True) -> bool:
-        """Odwolaj/przywroc termin wybrany na liscie "termin" (przyciski w planie)."""
-        if not self.termin or self.termin not in {t["klucz"] for t in self.terminy_dodatkowych()}:
-            raise ValueError("Wybierz termin zajęć")
-        id_, data = self.termin.split("|")
-        return await self.async_ustaw_odwolanie_terminu(id_, data, odwolana)
 
     def ustaw_formularz(self, pole: str, wartosc: Any) -> None:
         self.formularz[pole] = wartosc

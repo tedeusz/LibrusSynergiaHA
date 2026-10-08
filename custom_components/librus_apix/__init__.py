@@ -575,7 +575,7 @@ def _termin_od(termin: str, dzis) -> bool:
         return True
 
 
-PLATFORMS = ["sensor", "binary_sensor", "calendar", "text", "select", "time", "date", "button"]
+PLATFORMS = ["sensor", "binary_sensor", "calendar", "text", "select", "time", "date", "button", "todo"]
 
 CONFIG_SCHEMA = vol.Schema(
     {

@@ -1,4 +1,4 @@
-"""Przyciski formularza "Lekcja dodatkowa": dodaj, zapisz zmiany, usun oraz odwolaj / przywroc termin."""
+"""Przyciski formularza "Lekcja dodatkowa": dodaj, zapisz zmiany i usun."""
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -18,8 +18,6 @@ async def async_setup_entry(
         LibrusPrzyciskDodaj(coordinator, config_entry),
         LibrusPrzyciskZapisz(coordinator, config_entry),
         LibrusPrzyciskUsun(coordinator, config_entry),
-        LibrusPrzyciskOdwolaj(coordinator, config_entry),
-        LibrusPrzyciskPrzywroc(coordinator, config_entry),
     ])
 
 
@@ -64,31 +62,5 @@ class LibrusPrzyciskZapisz(_Przycisk):
     async def async_press(self) -> None:
         try:
             await self.coordinator.async_zapisz_z_formularza()
-        except ValueError as err:
-            raise ServiceValidationError(str(err)) from err
-
-
-class LibrusPrzyciskOdwolaj(_Przycisk):
-    """Odwoluje jeden termin zajec dodatkowych (wybrany na liscie "termin"); zajecia zostaja w planie jako odwolane."""
-
-    def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
-        super().__init__(coordinator, config_entry, "Lekcja dodatkowa - odwołaj termin", "odwolaj_termin", "mdi:calendar-remove")
-
-    async def async_press(self) -> None:
-        try:
-            await self.coordinator.async_odwolaj_wybrany(True)
-        except ValueError as err:
-            raise ServiceValidationError(str(err)) from err
-
-
-class LibrusPrzyciskPrzywroc(_Przycisk):
-    """Przywraca wczesniej odwolany termin zajec dodatkowych."""
-
-    def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
-        super().__init__(coordinator, config_entry, "Lekcja dodatkowa - przywróć termin", "przywroc_termin", "mdi:calendar-check")
-
-    async def async_press(self) -> None:
-        try:
-            await self.coordinator.async_odwolaj_wybrany(False)
         except ValueError as err:
             raise ServiceValidationError(str(err)) from err

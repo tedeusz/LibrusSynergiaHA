@@ -1,4 +1,4 @@
-"""Listy wyboru formularza "Lekcja dodatkowa": powtarzanie, dzien tygodnia, edycja, usuwanie i odwolywanie terminu."""
+"""Listy wyboru formularza "Lekcja dodatkowa": powtarzanie, dzien tygodnia, edycja i usuwanie."""
 from typing import List, Optional
 
 from homeassistant.components.select import SelectEntity
@@ -9,7 +9,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import LibrusDataUpdateCoordinator, LibrusEntityMixin
-from .lekcje_dodatkowe import COTYGODNIOWO, DNI_TYGODNIA, JEDNORAZOWO, etykiety, etykiety_terminow
+from .lekcje_dodatkowe import COTYGODNIOWO, DNI_TYGODNIA, JEDNORAZOWO, etykiety
 
 POWTARZANIE = {COTYGODNIOWO: "co tydzień", JEDNORAZOWO: "jednorazowo"}
 # Pierwsza opcja list: stan "nic nie wybrano" (zamiast "unknown")
@@ -26,7 +26,6 @@ async def async_setup_entry(
         LibrusWyborDnia(coordinator, config_entry),
         LibrusWyborDoUsuniecia(coordinator, config_entry),
         LibrusWyborEdycji(coordinator, config_entry),
-        LibrusWyborTerminu(coordinator, config_entry),
     ])
 
 
@@ -113,25 +112,3 @@ class LibrusWyborEdycji(_Wybor):
                 self.coordinator.wczytaj_do_formularza(id_)
                 return
         self.coordinator.wyczysc_formularz()
-
-
-class LibrusWyborTerminu(_Wybor):
-    """Najblizsze terminy zajec dodatkowych (z planu); wybrany odwolujesz albo przywracasz przyciskami."""
-
-    def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
-        super().__init__(coordinator, config_entry, "Lekcja dodatkowa - termin", "termin", "mdi:calendar-cursor")
-
-    def _etykiety(self) -> dict:
-        return etykiety_terminow(self.coordinator.terminy_dodatkowych())
-
-    @property
-    def options(self) -> List[str]:
-        return [NIC_NIE_WYBRANO, *self._etykiety().values()]
-
-    @property
-    def current_option(self) -> Optional[str]:
-        return self._etykiety().get(self.coordinator.termin, NIC_NIE_WYBRANO)
-
-    async def async_select_option(self, option: str) -> None:
-        self.coordinator.termin = next((k for k, napis in self._etykiety().items() if napis == option), None)
-        self.coordinator.async_update_listeners()

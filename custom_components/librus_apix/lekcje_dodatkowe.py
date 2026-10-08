@@ -216,23 +216,10 @@ def terminy(lekcje: Iterable[Dict[str, Any]], dzis: date, dni: int = TERMINY_DNI
                     "przedmiot": l["przedmiot"],
                     "od": l["od"],
                     "do": l["do"],
+                    "miejsce": l.get("miejsce", ""),
                     "odwolana": dzien.isoformat() in l.get("odwolane", []),
                 })
     wynik.sort(key=lambda t: (t["data"], minuty(t["od"]) or 0))
-    return wynik
-
-
-def etykiety_terminow(lista: List[Dict[str, Any]]) -> Dict[str, str]:
-    """{klucz: etykieta}, np. "Angielski · czw 09.10 16:00–17:00" (❌ przed nazwa, gdy termin odwolany)."""
-    wynik: Dict[str, str] = {}
-    uzyte: set = set()
-    for t in lista:
-        d = date.fromisoformat(t["data"])
-        napis = f"{'❌ ' if t['odwolana'] else ''}{t['przedmiot']} · {DNI_SKROT[d.weekday()]} {d:%d.%m} {t['od']}–{t['do']}"
-        if napis in uzyte:
-            napis = f"{napis} ({t['id']})"
-        uzyte.add(napis)
-        wynik[t["klucz"]] = napis
     return wynik
 
 

@@ -4,7 +4,7 @@
 # Druga zakladka ("Zajęcia dodatkowe") to formularz do recznego dopisywania zajec, ktorych nie ma w planie Librusa
 # (encje text/select/time/date/button.librus_imie_nazwisko_lekcja_dodatkowa_*). Dodane zajecia sa scalane z planem Librusa
 # we wszystkich czujnikach planu i w kalendarzu (oznaczone ➕), wiec np. "koniec ostatniej lekcji" je uwzglednia.
-# Pojedynczy termin zajec odwolasz na dole zakladki z planem (zostaje w planie jako ❌ odwolane), a istniejace zajecia
+# Pojedynczy termin zajec odwolasz na dole zakladki z planem: zaznacz go na liscie (zostaje w planie jako ❌ odwolane), a istniejace zajecia
 # edytujesz w drugiej zakladce (wybierz je na liscie "Edytuj istniejace", zmien pola i "Zapisz zmiany").
 # Przy zrealizowanych lekcjach pokazuje temat (Librus udostepnia tematy z ostatnich ~4 dni).
 title: Librus
@@ -126,26 +126,19 @@ views:
                   data:
                     kierunek: nastepny
 
-          # --- Odwolanie jednego terminu zajec dodatkowych (widoczne, gdy sa jakies zajecia dodatkowe) ---
+          # --- Odwolanie jednego terminu zajec dodatkowych: zaznacz pozycje na liscie (widoczne, gdy sa zajecia dodatkowe) ---
+          # Zaznaczony termin = odwolany (w planie wyzej pojawi sie jako ❌), odznaczenie go przywraca.
           - type: conditional
             conditions:
               - condition: numeric_state
                 entity: sensor.librus_imie_nazwisko_lekcje_dodatkowe
                 above: 0
             card:
-              type: entities
-              title: ➕ Zajęcia dodatkowe – odwołaj termin
-              show_header_toggle: false
-              state_color: false
-              entities:
-                - entity: select.librus_imie_nazwisko_lekcja_dodatkowa_termin
-                  name: Termin
-                - entity: button.librus_imie_nazwisko_lekcja_dodatkowa_odwolaj_termin
-                  name: Odwołaj ten termin (tylko ten jeden dzień)
-                  icon: mdi:calendar-remove
-                - entity: button.librus_imie_nazwisko_lekcja_dodatkowa_przywroc_termin
-                  name: Przywróć odwołany termin
-                  icon: mdi:calendar-check
+              type: todo-list
+              entity: todo.librus_imie_nazwisko_zajecia_dodatkowe_terminy
+              title: ➕ Zajęcia dodatkowe – zaznacz, aby odwołać termin
+              hide_create: true
+              display_order: duedate_asc
 
   # ===========================================================================
   # Zakladka 2: zajecia dodatkowe (dopisywane recznie do planu z Librusa)

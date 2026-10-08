@@ -32,7 +32,8 @@ Nazwy encji zależą od nazwy ucznia, np. `sensor.librus_<imie_nazwisko>_oceny`.
 | `sensor.librus_..._wiadomosci` | Wiadomości (liczba nieprzeczytanych; atrybuty: lista, otwarta wiadomość, ekran przeglądania) |
 | `sensor.librus_..._plan_lekcji_dzis`, `..._plan_lekcji_nastepny_dzien`, `..._plan_lekcji_tydzien` | Plan lekcji na dziś, następny dzień nauki i tydzień (z przeglądaniem tygodni) |
 | `sensor.librus_..._lekcje_dodatkowe` | Zajęcia dodatkowe dopisane ręcznie (liczba; atrybuty: lista z `id`, terminem i miejscem) |
-| `text.`, `select.`, `time.`, `date.`, `button.librus_..._lekcja_dodatkowa_*` | Formularz dodawania i usuwania zajęć dodatkowych w UI (patrz niżej) |
+| `text.`, `select.`, `time.`, `date.`, `button.librus_..._lekcja_dodatkowa_*` | Formularz dodawania, edycji i usuwania zajęć dodatkowych w UI (patrz niżej) |
+| `todo.librus_..._zajecia_dodatkowe_terminy` | Najbliższe terminy zajęć dodatkowych; zaznaczenie terminu odwołuje go w planie |
 | `sensor.librus_..._aktualna_lekcja` | Trwająca lekcja i następna |
 | `sensor.librus_..._poczatek_lekcji_dzis`, `..._koniec_lekcji_dzis`, `..._poczatek_lekcji_nastepny_dzien` | Znaczniki czasu do wyzwalaczy w automatyzacjach |
 | `sensor.librus_..._zadania_domowe`, `..._zadania` | Zadania domowe (z treścią zadań z najbliższych dni) |
@@ -396,8 +397,8 @@ Zajęcia spoza planu Librusa dodajesz w UI, bez edycji YAML-a: wpisz nazwę (i o
 - Zajęcia są zapisane w `Store` Home Assistanta (przeżywają restart i aktualizację), osobno dla każdego konta. Jednorazowe zajęcia starsze niż 30 dni są usuwane przy starcie.
 - Plan, który widzą czujniki (`..._plan_lekcji_dzis`, `..._nastepny_dzien`, `..._tydzien`, `..._aktualna_lekcja`), kalendarz oraz znaczniki `..._poczatek_lekcji_*` i `..._koniec_lekcji_dzis`, to **suma planu z Librusa i zajęć dodatkowych** posortowana wg godziny rozpoczęcia. Dlatego automatyzacja „koniec ostatniej lekcji” uwzględnia je bez żadnych zmian w wyzwalaczu.
 - Zajęcia dodatkowe mają `numer` równy `+` i atrybut `dodatkowa: true` (w kalendarzu mają przedrostek ➕). Jeśli Librus chwilowo nie zwróci planu, plan składa się z samych zajęć dodatkowych, a po następnym udanym pobraniu wraca pełny.
-- **Odwołanie jednego terminu**: wybierz termin na liście `..._lekcja_dodatkowa_termin` (pod planem) i naciśnij `..._odwolaj_termin`. Zajęcia zostają w planie jako ❌ odwołane (jak odwołana lekcja szkolna: nie liczą się do ostatniej lekcji ani do „aktualnej lekcji”), kolejne tygodnie bez zmian. `..._przywroc_termin` cofa odwołanie. To samo robią usługi `odwolaj_termin_lekcji_dodatkowej` i `przywroc_termin_lekcji_dodatkowej`.
-- **Edycja**: wybierz zajęcia na liście `..._lekcja_dodatkowa_edycja` (ładują się do formularza), zmień pola i naciśnij `..._zapisz_zmiany`; „➕ nowe zajęcia” wraca do dodawania. Zachowują identyfikator i te odwołane terminy, które nadal pasują do nowego dnia.
+- **Odwołanie jednego terminu**: na liście `todo.librus_..._zajecia_dodatkowe_terminy` (pod planem) zaznacz termin, żeby go odwołać; odznaczenie go przywraca. Zajęcia zostają w planie jako ❌ odwołane (jak odwołana lekcja szkolna: nie liczą się do ostatniej lekcji ani do „aktualnej lekcji”), kolejne tygodnie bez zmian. To samo robią usługi `odwolaj_termin_lekcji_dodatkowej` i `przywroc_termin_lekcji_dodatkowej`.
+- **Edycja**: wybierz zajęcia na liście `select.librus_..._lekcja_dodatkowa_edycja` (ładują się do formularza), zmień pola i naciśnij `..._zapisz_zmiany`; „➕ nowe zajęcia” wraca do dodawania. Zachowują identyfikator i te odwołane terminy, które nadal pasują do nowego dnia.
 - Ponowne dodanie takich samych zajęć (ta sama nazwa, godziny i termin) jest odrzucane.
 
 ## 🛠️ Rozwój
