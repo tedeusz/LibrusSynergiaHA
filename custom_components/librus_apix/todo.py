@@ -40,7 +40,8 @@ class LibrusTerminyZajec(LibrusEntityMixin, CoordinatorEntity, TodoListEntity):
         return [
             TodoItem(
                 uid=t["klucz"],
-                summary=f"{t['przedmiot']} · {t['od']}–{t['do']}",
+                # sekcja "Ukonczone" to wbudowany napis karty HA - dlatego odwolanie opisujemy tez w tresci pozycji
+                summary=f"{t['przedmiot']} · {t['od']}–{t['do']}" + (" · odwołane" if t["odwolana"] else ""),
                 status=TodoItemStatus.COMPLETED if t["odwolana"] else TodoItemStatus.NEEDS_ACTION,
                 due=date.fromisoformat(t["data"]),
                 description=t["miejsce"] or None,
