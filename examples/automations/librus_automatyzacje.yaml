@@ -1,4 +1,6 @@
 # Automatyzacje powiadomień Librus -> notify.mobile_app_TWOJ_TELEFON (ttl: 0, priority: high)
+# Dotknięcie powiadomienia otwiera odpowiedni widok pulpitu (clickAction = Android, url = iOS) - w każdej automatyzacji
+# zmień ścieżkę /librus-.../N na adres swojego pulpitu (tak jak w przyciskach librus_widok_glowny.yaml).
 # Wklej do automations.yaml albo pojedynczo: Ustawienia > Automatyzacje > Utwórz > ⋮ > Edytuj w YAML.
 # Składnia: HA 2024.10+ (triggers/conditions/actions, "action:"). Starsze wersje: trigger/condition/action + "service:".
 
@@ -26,6 +28,8 @@
         data:
           ttl: 0
           priority: high
+          clickAction: /librus-zadania/0
+          url: /librus-zadania/0
 
 # 2) Nowe ZADANIE DOMOWE (każda kategoria inna niż "Zadanie")
 - id: librus_nowe_zadanie_domowe
@@ -51,6 +55,8 @@
         data:
           ttl: 0
           priority: high
+          clickAction: /librus-zadania/0
+          url: /librus-zadania/0
 
 # 3) Nowa NIEOBECNOŚĆ (nieusprawiedliwiona, "nb")
 # Reaguje na wzrost licznika sensora Nieobecnosci, więc przy kilku lekcjach naraz
@@ -85,6 +91,8 @@
         data:
           ttl: 0
           priority: high
+          clickAction: /librus-frekwencja/0
+          url: /librus-frekwencja/0
 
 # 4) Koniec ostatniej lekcji wg planu - wyzwalacz na czujniku-znaczniku czasu (bez odpytywania co minute)
 - id: librus_koniec_ostatniej_lekcji
@@ -117,6 +125,8 @@
         data:
           ttl: 0
           priority: high
+          clickAction: /librus-plan-lekcji/0
+          url: /librus-plan-lekcji/0
 
 # 5) Wylosowano szczęśliwy numerek ucznia
 - id: librus_szczesliwy_numerek_ucznia
@@ -143,6 +153,8 @@
         data:
           ttl: 0
           priority: high
+          clickAction: /librus-overview/0
+          url: /librus-overview/0
 
 # 6) Nowa OCENA (z wagą i komentarzem)
 - id: librus_nowa_ocena
@@ -166,6 +178,8 @@
         data:
           ttl: 0
           priority: high
+          clickAction: /librus-oceny/0
+          url: /librus-oceny/0
 
 # 7) Nowe OGŁOSZENIE szkoły
 - id: librus_nowe_ogloszenie
@@ -186,6 +200,8 @@
         data:
           ttl: 0
           priority: high
+          clickAction: /librus-overview/szkola
+          url: /librus-overview/szkola
 
 # 8) Nowa UWAGA lub POCHWAŁA (pole "znak": negatywna / pozytywna / neutralna)
 - id: librus_nowa_uwaga
@@ -207,6 +223,8 @@
         data:
           ttl: 0
           priority: high
+          clickAction: /librus-oceny/uwagi
+          url: /librus-oceny/uwagi
 
 # 9) Nowy WPIS O ZACHOWANIU (rodzaj: pozytywne / negatywne / neutralne)
 - id: librus_nowy_wpis_zachowania
@@ -228,6 +246,8 @@
         data:
           ttl: 0
           priority: high
+          clickAction: /librus-oceny/uwagi
+          url: /librus-oceny/uwagi
 
 # 10) Przypomnienie wieczorem (18:00) o sprawdzianach i zadaniach domowych na JUTRO
 # Wyzwalane z kalendarza "Terminarz i zadania": wydarzenia całodniowe zaczynają się o 00:00, offset -6h = 18:00 dzień wcześniej.
@@ -249,6 +269,8 @@
         data:
           ttl: 0
           priority: high
+          clickAction: /librus-terminarz/0
+          url: /librus-terminarz/0
 
 # 11) Nowa WIADOMOŚĆ - dane bierzemy ze ZDARZENIA (trigger.event.data), a nie z czujnika.
 # Przykład z README integracji czyta czujnik, który w chwili zdarzenia ma jeszcze starą listę -> "nieznany".
@@ -277,7 +299,7 @@
         data:
           ttl: 0
           priority: high
-          # Dotknięcie powiadomienia otwiera widok Wiadomości (zmień ścieżkę na swoją).
+          # Dotknięcie powiadomienia otwiera widok Wiadomości.
           # Android: clickAction, iOS: url. Treść pobierzesz klikając wiadomość na liście.
           clickAction: /librus-wiadomosci/0
           url: /librus-wiadomosci/0
