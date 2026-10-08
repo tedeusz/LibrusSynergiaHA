@@ -202,11 +202,11 @@ def usun_przedawnione(lekcje: List[Dict[str, Any]], dzis: date) -> List[Dict[str
     ]
 
 
-def terminy(lekcje: Iterable[Dict[str, Any]], dzis: date, dni: int = TERMINY_DNI) -> List[Dict[str, Any]]:
-    """Najblizsze terminy lekcji dodatkowych (od dzis, `dni` dni do przodu) - do odwolywania/przywracania."""
+def terminy(lekcje: Iterable[Dict[str, Any]], od: date, dni: int = TERMINY_DNI) -> List[Dict[str, Any]]:
+    """Terminy lekcji dodatkowych od dnia `od` przez `dni` dni - do odwolywania/przywracania."""
     wynik = []
     for przesuniecie in range(dni):
-        dzien = dzis + timedelta(days=przesuniecie)
+        dzien = od + timedelta(days=przesuniecie)
         for l in lekcje:
             if pasuje(l, dzien):
                 wynik.append({

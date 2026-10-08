@@ -26,7 +26,7 @@ async def async_setup_entry(
 
 
 class LibrusTerminyZajec(LibrusEntityMixin, CoordinatorEntity, TodoListEntity):
-    """Najblizsze terminy zajec dodatkowych; zaznaczony (wykonany) termin = zajecia odwolane."""
+    """Terminy zajec dodatkowych z tygodnia pokazanego w planie (podaza za stronicowaniem); zaznaczony termin = odwolany."""
 
     _attr_supported_features = TodoListEntityFeature.UPDATE_TODO_ITEM
     _odswiez_o_polnocy = True

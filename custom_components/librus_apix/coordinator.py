@@ -985,7 +985,9 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         return zmieniono
 
     def terminy_dodatkowych(self) -> List[Dict[str, Any]]:
-        return LD.terminy(self._dodatkowe, _dzis())
+        """Terminy zajec dodatkowych z tygodnia (pon-pt) pokazanego teraz w widoku planu - podaza za jego stronicowaniem."""
+        poniedzialek = _poniedzialek_tygodnia_szkolnego(_dzis()) + timedelta(weeks=self._plan_tydzien)
+        return LD.terminy(self._dodatkowe, poniedzialek, 5)
 
     def ustaw_formularz(self, pole: str, wartosc: Any) -> None:
         self.formularz[pole] = wartosc

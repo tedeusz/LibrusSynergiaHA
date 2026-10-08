@@ -4,7 +4,7 @@
 # Druga zakladka ("Zajęcia dodatkowe") to formularz do recznego dopisywania zajec, ktorych nie ma w planie Librusa
 # (encje text/select/time/date/button.librus_imie_nazwisko_lekcja_dodatkowa_*). Dodane zajecia sa scalane z planem Librusa
 # we wszystkich czujnikach planu i w kalendarzu (oznaczone ➕), wiec np. "koniec ostatniej lekcji" je uwzglednia.
-# Pojedynczy termin zajec odwolasz na dole zakladki z planem: zaznacz go na liscie (zostaje w planie jako ❌ odwolane), a istniejace zajecia
+# Pojedynczy termin zajec odwolasz na dole zakladki z planem: zaznacz go na liscie tygodnia pokazanego w planie (zostaje w planie jako ❌ odwolane), a istniejace zajecia
 # edytujesz w drugiej zakladce (wybierz je na liscie "Edytuj istniejace", zmien pola i "Zapisz zmiany").
 # Przy zrealizowanych lekcjach pokazuje temat (Librus udostepnia tematy z ostatnich ~4 dni).
 title: Librus
@@ -126,7 +126,7 @@ views:
                   data:
                     kierunek: nastepny
 
-          # --- Odwolanie jednego terminu zajec dodatkowych: zaznacz pozycje na liscie (widoczne, gdy sa zajecia dodatkowe) ---
+          # --- Odwolanie jednego terminu zajec dodatkowych: zaznacz pozycje na liscie (lista podaza za tygodniem z planu; widoczna, gdy sa zajecia dodatkowe) ---
           # Zaznaczony termin = odwolany (w planie wyzej pojawi sie jako ❌), odznaczenie go przywraca.
           - type: conditional
             conditions:
@@ -136,7 +136,7 @@ views:
             card:
               type: todo-list
               entity: todo.librus_imie_nazwisko_zajecia_dodatkowe_terminy
-              title: ➕ Zajęcia dodatkowe – zaznacz, aby odwołać termin
+              title: ➕ Zajęcia dodatkowe w wyświetlanym tygodniu – zaznacz, aby odwołać
               hide_create: true
               display_order: duedate_asc
 
