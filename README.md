@@ -31,8 +31,8 @@ Nazwy encji zależą od nazwy ucznia, np. `sensor.librus_<imie_nazwisko>_oceny`.
 | `sensor.librus_..._<przedmiot>` | Oceny z danego przedmiotu |
 | `sensor.librus_..._wiadomosci` | Wiadomości (liczba nieprzeczytanych; atrybuty: lista, otwarta wiadomość, ekran przeglądania) |
 | `sensor.librus_..._plan_lekcji_dzis`, `..._plan_lekcji_nastepny_dzien`, `..._plan_lekcji_tydzien` | Plan lekcji na dziś, następny dzień nauki i tydzień (z przeglądaniem tygodni) |
-| `sensor.librus_..._lekcje_dodatkowe` | Zajęcia dodatkowe dopisane ręcznie (liczba; atrybuty: lista z `id`, terminem i miejscem) |
-| `text.`, `select.`, `time.`, `date.`, `button.librus_..._lekcja_dodatkowa_*` | Formularz dodawania, edycji i usuwania zajęć dodatkowych w UI (patrz niżej) |
+| `sensor.librus_..._lekcje_dodatkowe` | Zajęcia dodatkowe dopisane ręcznie (liczba; atrybuty: `lekcje` z `id`, terminem, miejscem i `odwolane_terminy`, `dzis` oraz `terminy` z najbliższych 3 tygodni) |
+| `text.`, `select.`, `time.`, `date.`, `button.librus_..._lekcja_dodatkowa_*` | Formularz dodawania, edycji i usuwania zajęć dodatkowych w UI: pola `..._nazwa`, `..._miejsce`, `..._powtarzanie`, `..._dzien`, `..._data`, `..._od`, `..._do`, lista `..._edycja`, przyciski `..._dodaj`, `..._zapisz_zmiany`, `..._usun` i lista `..._do_usuniecia` (patrz niżej) |
 | `todo.librus_..._zajecia_dodatkowe_terminy` | Terminy zajęć dodatkowych z tygodnia pokazanego w planie; zaznaczenie terminu odwołuje go |
 | `sensor.librus_..._aktualna_lekcja` | Trwająca lekcja i następna |
 | `sensor.librus_..._poczatek_lekcji_dzis`, `..._koniec_lekcji_dzis`, `..._poczatek_lekcji_nastepny_dzien` | Znaczniki czasu do wyzwalaczy w automatyzacjach |
@@ -312,7 +312,7 @@ W katalogu [`examples/`](examples) są gotowe pulpity i automatyzacje używając
 | `examples/dashboards/wiadomosci_dashboard.yaml` | Wiadomości ze stronicowaniem i podglądem treści |
 | `examples/dashboards/librus_szkola_dashboard.yaml` | Ogłoszenia szkoły ze stronicowaniem |
 | `examples/dashboards/frekwencja_dashboard.yaml` | Frekwencja, liczniki i lista wpisów ze stronicowaniem |
-| `examples/automations/librus_automatyzacje.yaml` | Powiadomienia: nowe zadanie, nieobecność, ocena, ogłoszenie, uwaga, wpis o zachowaniu, wiadomość, koniec lekcji, przypomnienie o terminach |
+| `examples/automations/librus_automatyzacje.yaml` | Powiadomienia: nowe zadanie, nieobecność, ocena, ogłoszenie, uwaga, wpis o zachowaniu, wiadomość, koniec lekcji (także zajęć dodatkowych), przypomnienie o terminach |
 
 Przyciski przeglądania w pulpitach używają kart [Mushroom](https://github.com/piitaya/lovelace-mushroom) (instalacja przez HACS). Wklejanie pulpitu: Ustawienia → Pulpity → (pulpit) → Edytuj → ⋮ → Edytor YAML.
 
@@ -392,20 +392,22 @@ automation:
 
 ### Zajęcia dodatkowe
 
-Zajęcia spoza planu Librusa dodajesz w UI, bez edycji YAML-a: wpisz nazwę (i opcjonalnie miejsce), wybierz `co tydzień` + dzień tygodnia albo `jednorazowo` + datę, ustaw godziny i naciśnij przycisk `..._lekcja_dodatkowa_dodaj`. Ten sam efekt daje usługa `librus_apix.dodaj_lekcje_dodatkowa`. Gotowy formularz jest w drugiej zakładce `plan_lekcji_dashboard.yaml`.
+Zajęcia spoza planu Librusa dodajesz w UI, bez edycji YAML-a: wpisz nazwę (i opcjonalnie miejsce), wybierz `co tydzień` + dzień tygodnia albo `jednorazowo` + datę, ustaw godziny i naciśnij przycisk `..._lekcja_dodatkowa_dodaj`. Ten sam efekt daje usługa `librus_apix.dodaj_lekcje_dodatkowa`. Gotowy formularz (dodawanie, edycja, usuwanie) jest w drugiej zakładce `plan_lekcji_dashboard.yaml`, a lista terminów do odwołania na dole pierwszej.
 
 - Zajęcia są zapisane w `Store` Home Assistanta (przeżywają restart i aktualizację), osobno dla każdego konta. Jednorazowe zajęcia starsze niż 30 dni są usuwane przy starcie.
 - Plan, który widzą czujniki (`..._plan_lekcji_dzis`, `..._nastepny_dzien`, `..._tydzien`, `..._aktualna_lekcja`), kalendarz oraz znaczniki `..._poczatek_lekcji_*` i `..._koniec_lekcji_dzis`, to **suma planu z Librusa i zajęć dodatkowych** posortowana wg godziny rozpoczęcia. Dlatego automatyzacja „koniec ostatniej lekcji” uwzględnia je bez żadnych zmian w wyzwalaczu.
 - Zajęcia dodatkowe mają `numer` równy `+` i atrybut `dodatkowa: true` (w kalendarzu mają przedrostek ➕). Jeśli Librus chwilowo nie zwróci planu, plan składa się z samych zajęć dodatkowych, a po następnym udanym pobraniu wraca pełny.
 - **Odwołanie jednego terminu**: na liście `todo.librus_..._zajecia_dodatkowe_terminy` (pod planem; pokazuje zajęcia z tygodnia wyświetlanego w planie i przesuwa się razem z nim) zaznacz termin, żeby go odwołać; odznaczenie go przywraca. Zajęcia zostają w planie jako ❌ odwołane (jak odwołana lekcja szkolna: nie liczą się do ostatniej lekcji ani do „aktualnej lekcji”), kolejne tygodnie bez zmian. To samo robią usługi `odwolaj_termin_lekcji_dodatkowej` i `przywroc_termin_lekcji_dodatkowej`.
 - **Edycja**: wybierz zajęcia na liście `select.librus_..._lekcja_dodatkowa_edycja` (ładują się do formularza), zmień pola i naciśnij `..._zapisz_zmiany`; „➕ nowe zajęcia” wraca do dodawania. Zachowują identyfikator i te odwołane terminy, które nadal pasują do nowego dnia.
+- **Usuwanie** (całych zajęć, nie jednego terminu): wybierz zajęcia na liście `..._lekcja_dodatkowa_do_usuniecia` i naciśnij `..._lekcja_dodatkowa_usun` albo użyj usługi `usun_lekcje_dodatkowa`.
+- Lista zadań ma wbudowane w Home Assistanta nagłówki „Aktywne” i „Ukończone”: odwołane terminy trafiają do sekcji „Ukończone” (przekreślone, z dopiskiem „odwołane”). Tych nagłówków nie da się zmienić w konfiguracji karty.
 - Ponowne dodanie takich samych zajęć (ta sama nazwa, godziny i termin) jest odrzucane.
 
 ## 🛠️ Rozwój
 
 ### Wymagania
 - Python 3.9+
-- Home Assistant 2023.1+
+- Home Assistant 2023.12+
 - librus-apix library
 
 ### Setup środowiska deweloperskiego
