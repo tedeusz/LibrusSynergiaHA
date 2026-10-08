@@ -12,6 +12,7 @@ Integracja Home Assistant z systemem Librus Synergia: oceny (także opisowe), wi
 - 📈 **Statystyki** - średnie ocen, liczba ocen, trend
 - 📧 **Wiadomości** - lista z treścią pobieraną na żądanie i stronicowaniem do starszych wiadomości
 - 🗓️ **Plan lekcji** - plan dnia i tygodnia z zastępstwami i odwołanymi lekcjami, aktualna lekcja, czasy początku i końca lekcji
+- ➕ **Zajęcia dodatkowe** - ręcznie dopisywane do planu zajęcia, których nie ma w Librusie (koło, język, basen); plan = Librus + dodatkowe
 - 📝 **Zadania domowe, terminarz i sprawdziany** - pogrupowane po dniach, ze stronicowaniem
 - ✅ **Frekwencja** - procent, liczniki nieobecności, spóźnień i zwolnień oraz lista wpisów ze stronicowaniem
 - 📢 **Ogłoszenia szkoły** i 📖 **tematy lekcji**
@@ -30,6 +31,8 @@ Nazwy encji zależą od nazwy ucznia, np. `sensor.librus_<imie_nazwisko>_oceny`.
 | `sensor.librus_..._<przedmiot>` | Oceny z danego przedmiotu |
 | `sensor.librus_..._wiadomosci` | Wiadomości (liczba nieprzeczytanych; atrybuty: lista, otwarta wiadomość, ekran przeglądania) |
 | `sensor.librus_..._plan_lekcji_dzis`, `..._plan_lekcji_nastepny_dzien`, `..._plan_lekcji_tydzien` | Plan lekcji na dziś, następny dzień nauki i tydzień (z przeglądaniem tygodni) |
+| `sensor.librus_..._lekcje_dodatkowe` | Zajęcia dodatkowe dopisane ręcznie (liczba; atrybuty: lista z `id`, terminem i miejscem) |
+| `text.`, `select.`, `time.`, `date.`, `button.librus_..._lekcja_dodatkowa_*` | Formularz dodawania i usuwania zajęć dodatkowych w UI (patrz niżej) |
 | `sensor.librus_..._aktualna_lekcja` | Trwająca lekcja i następna |
 | `sensor.librus_..._poczatek_lekcji_dzis`, `..._koniec_lekcji_dzis`, `..._poczatek_lekcji_nastepny_dzien` | Znaczniki czasu do wyzwalaczy w automatyzacjach |
 | `sensor.librus_..._zadania_domowe`, `..._zadania` | Zadania domowe (z treścią zadań z najbliższych dni) |
@@ -52,6 +55,7 @@ Sensory średnich mają `state_class: measurement` — HA automatycznie rysuje d
 - **Własny parser strony ocen** uzupełniający wyniki biblioteki, gdy ta pominie część ocen.
 - **Warstwowe odświeżanie** zamiast jednego rzadkiego cyklu (patrz niżej).
 - **Nowe sensory, kalendarz i sensory binarne**: plan lekcji, zadania domowe, frekwencja, ogłoszenia, tematy lekcji, aktualna lekcja, uwagi i zachowanie.
+- **Zajęcia dodatkowe w planie**: ręczne uzupełnianie planu o zajęcia spoza Librusa, widoczne we wszystkich czujnikach planu i w kalendarzu.
 - **Przeglądanie list usługami** (bez dodatkowych zapytań do Librusa) do budowy dashboardów ze stronicowaniem.
 - **Treść wiadomości na żądanie**, zapamiętywana w `Store`, bez oznaczania starych wiadomości jako przeczytanych.
 - **Zdarzenia HA** dla nowych ocen, wiadomości, zadań, terminarza, ogłoszeń, wpisów frekwencji, uwag i wpisów o zachowaniu.
@@ -82,6 +86,8 @@ Usługi przesuwają ekran listy (atrybut `przegladanie` odpowiedniego sensora) i
 | `librus_apix.przegladaj_frekwencje` | Lista nieobecności, spóźnień i zwolnień |
 | `librus_apix.przegladaj_uwagi` | Lista uwag i pochwał |
 | `librus_apix.przegladaj_plan` | Tydzień planu lekcji: `kierunek` = `poprzedni`, `biezacy`, `nastepny` |
+| `librus_apix.dodaj_lekcje_dodatkowa` | Dopisuje zajęcia do planu: `przedmiot`, `od`, `do`, `powtarzanie` (`co_tydzien` / `jednorazowo`), `dzien` (0 = poniedziałek … 6) albo `data`, opcjonalnie `miejsce` |
+| `librus_apix.usun_lekcje_dodatkowa` | Usuwa zajęcia po `id` (z atrybutu `lekcje` sensora `..._lekcje_dodatkowe`) |
 | `librus_apix.diagnostyka_ocen` | Zapisuje raport diagnostyczny ocen w katalogu konfiguracji HA |
 
 ### Diagnostyka ocen
@@ -297,7 +303,7 @@ W katalogu [`examples/`](examples) są gotowe pulpity i automatyzacje używając
 |------|-----------|
 | `examples/dashboards/librus_widok_glowny.yaml` | Widok główny z kafelkami przechodzącymi do pozostałych pulpitów |
 | `examples/dashboards/oceny_dashboard.yaml` | Dwie zakładki: oceny wg przedmiotów i lista ostatnich ocen ze stronicowaniem oraz uwagi i zachowanie |
-| `examples/dashboards/plan_lekcji_dashboard.yaml` | Plan tygodnia ze stronicowaniem, aktualna lekcja i tematy lekcji |
+| `examples/dashboards/plan_lekcji_dashboard.yaml` | Dwie zakładki: plan tygodnia ze stronicowaniem, aktualna lekcja i tematy lekcji oraz formularz zajęć dodatkowych |
 | `examples/dashboards/zadania_dashboard.yaml` | Zadania domowe po dniach ze stronicowaniem |
 | `examples/dashboards/terminarz_dashboard.yaml`, `sprawdziany_dashboard.yaml` | Terminarz i sprawdziany ze stronicowaniem |
 | `examples/dashboards/wiadomosci_dashboard.yaml` | Wiadomości ze stronicowaniem i podglądem treści |
@@ -380,6 +386,15 @@ automation:
 - **Zachowanie** jest czytane z tej samej strony ocen, więc nie kosztuje dodatkowego zapytania. Ocena śródroczna jest „propozycją”, dopóki etykieta w Librusie mówi o ocenie przewidywanej.
 - **Uwagi** to osobna strona Librusa (jedno lekkie zapytanie co 15 minut). Jeśli konto nie ma modułu Uwagi, integracja stwierdza to jednym zapytaniem kontrolnym i pomija go przez 24 godziny, zamiast logować się ponownie co cykl (atrybut `dostepne` = `false`).
 - Gdy strona uwag ma nieznany układ (nic nie odczytano i brak napisu „Brak uwag”), lista nie jest kasowana, atrybut `nierozpoznany_uklad` = `true`, a usługa `librus_apix.diagnostyka_ocen` zapisze jej HTML do analizy.
+
+### Zajęcia dodatkowe
+
+Zajęcia spoza planu Librusa dodajesz w UI, bez edycji YAML-a: wpisz nazwę (i opcjonalnie miejsce), wybierz `co tydzień` + dzień tygodnia albo `jednorazowo` + datę, ustaw godziny i naciśnij przycisk `..._lekcja_dodatkowa_dodaj`. Ten sam efekt daje usługa `librus_apix.dodaj_lekcje_dodatkowa`. Gotowy formularz jest w drugiej zakładce `plan_lekcji_dashboard.yaml`.
+
+- Zajęcia są zapisane w `Store` Home Assistanta (przeżywają restart i aktualizację), osobno dla każdego konta. Jednorazowe zajęcia starsze niż 30 dni są usuwane przy starcie.
+- Plan, który widzą czujniki (`..._plan_lekcji_dzis`, `..._nastepny_dzien`, `..._tydzien`, `..._aktualna_lekcja`), kalendarz oraz znaczniki `..._poczatek_lekcji_*` i `..._koniec_lekcji_dzis`, to **suma planu z Librusa i zajęć dodatkowych** posortowana wg godziny rozpoczęcia. Dlatego automatyzacja „koniec ostatniej lekcji” uwzględnia je bez żadnych zmian w wyzwalaczu.
+- Zajęcia dodatkowe mają `numer` równy `+` i atrybut `dodatkowa: true` (w kalendarzu mają przedrostek ➕). Jeśli Librus chwilowo nie zwróci planu, plan składa się z samych zajęć dodatkowych, a po następnym udanym pobraniu wraca pełny.
+- Ponowne dodanie takich samych zajęć (ta sama nazwa, godziny i termin) jest odrzucane.
 
 ## 🛠️ Rozwój
 

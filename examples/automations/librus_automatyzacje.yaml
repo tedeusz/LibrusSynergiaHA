@@ -89,7 +89,7 @@
 # 4) Koniec ostatniej lekcji wg planu - wyzwalacz na czujniku-znaczniku czasu (bez odpytywania co minute)
 - id: librus_koniec_ostatniej_lekcji
   alias: "Librus - koniec ostatniej lekcji"
-  description: "O godzinie konca ostatniej (nieodwolanej) lekcji z dzisiejszego planu."
+  description: "O godzinie konca ostatniej (nieodwolanej) lekcji z dzisiejszego planu - lacznie z zajeciami dodatkowymi dopisanymi recznie."
   mode: single
   triggers:
     - trigger: time
@@ -108,7 +108,9 @@
         title: "🏫 Koniec lekcji na dziś"
         message: >-
           {%- if lekcje -%}
-          Ostatnia lekcja ({{ lekcje[-1].numer }}. {{ lekcje[-1].przedmiot }}) skończyła się o {{ koniec }}.
+          {%- set ost = lekcje[-1] -%}
+          {%- set dod = ost.dodatkowa is defined and ost.dodatkowa -%}
+          {{ 'Ostatnie zajęcia' if dod else 'Ostatnia lekcja' }} ({{ '➕ ' if dod else ost.numer ~ '. ' }}{{ ost.przedmiot }}) {{ 'skończyły' if dod else 'skończyła' }} się o {{ koniec }}.
           {%- else -%}
           Lekcje na dziś skończyły się o {{ koniec }}.
           {%- endif -%}

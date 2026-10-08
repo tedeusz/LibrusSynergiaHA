@@ -1,6 +1,9 @@
 # Dashboard "Plan lekcji" dla integracji Librus APIX
 # Wklej: Ustawienia > Pulpity > (pulpit) > Edytuj > ⋮ > Edytor YAML (Raw configuration editor)
 # Wymaga czujnikow sensor.librus_imie_nazwisko_aktualna_lekcja i ..._tematy_lekcji (nowa wersja integracji).
+# Druga zakladka ("Zajęcia dodatkowe") to formularz do recznego dopisywania zajec, ktorych nie ma w planie Librusa
+# (encje text/select/time/date/button.librus_imie_nazwisko_lekcja_dodatkowa_*). Dodane zajecia sa scalane z planem Librusa
+# we wszystkich czujnikach planu i w kalendarzu (oznaczone ➕), wiec np. "koniec ostatniej lekcji" je uwzglednia.
 # Przy zrealizowanych lekcjach pokazuje temat (Librus udostepnia tematy z ostatnich ~4 dni).
 title: Librus
 views:
@@ -44,6 +47,7 @@ views:
             content: |
               {%- set e = 'sensor.librus_imie_nazwisko_plan_lekcji_tydzien' -%}
               {%- set akt_nr = state_attr('sensor.librus_imie_nazwisko_aktualna_lekcja', 'numer') -%}
+              {%- set akt_od = state_attr('sensor.librus_imie_nazwisko_aktualna_lekcja', 'od') -%}
               {%- set p = state_attr(e, 'przegladanie') or {} -%}
               {%- set plan = p.plan or {} -%}
               {%- set dzis = now().date() -%}
@@ -73,9 +77,11 @@ views:
               {%- if not tm.t and (x.numer | string) == (l.numer | string) %}{% set tm.t = '<br>📖 <i>' ~ x.temat ~ '</i>' %}{% endif %}
               {%- endfor %}
               {%- endif %}
-              {%- set trwa = (roznica == 0 and akt_nr is not none and l.numer == akt_nr and not l.odwolana) %}
+              {%- set trwa = (roznica == 0 and akt_nr is not none and (l.numer | string) == (akt_nr | string) and l.od == akt_od and not l.odwolana) %}
               {%- if l.odwolana %}
               - ❌ **{{ l.numer }}** · {{ l.od }}–{{ l.do }} · ~~{{ l.przedmiot }}~~ _({{ l.zmiana | lower }})_
+              {%- elif l.dodatkowa is defined and l.dodatkowa %}
+              - {{ '🟢' if trwa else '➕' }} {{ l.od }}–{{ l.do }} · **{{ l.przedmiot }}**{% if l.nauczyciel_sala %} · {{ l.nauczyciel_sala }}{% endif %} _({{ 'trwa teraz' if trwa else 'zajęcia dodatkowe' }})_
               {%- elif l.zmiana %}
               - {{ '🟢' if trwa else '🔄' }} **{{ l.numer }}** · {{ l.od }}–{{ l.do }} · **{{ l.przedmiot_zastepczy if l.przedmiot_zastepczy is defined else l.przedmiot }}** — _{{ l.zmiana | lower }}{% if l.zastepca is defined %}: {{ l.zastepca }}{% endif %}{% if l.sala_zastepcza is defined %} · sala {{ l.sala_zastepcza }}{% endif %}_{{ tm.t }}
               {%- elif trwa %}
@@ -86,7 +92,7 @@ views:
               {%- endfor %}
               {%- endfor %}
 
-              <small>🟢 trwa teraz · ❌ odwołane · 🔄 zmiana / zastępstwo · 📖 temat lekcji</small>
+              <small>🟢 trwa teraz · ❌ odwołane · 🔄 zmiana / zastępstwo · ➕ zajęcia dodatkowe · 📖 temat lekcji</small>
               {%- endif -%}
           - type: horizontal-stack
             cards:
@@ -117,3 +123,99 @@ views:
                   perform_action: librus_apix.przegladaj_plan
                   data:
                     kierunek: nastepny
+
+  # ===========================================================================
+  # Zakladka 2: zajecia dodatkowe (dopisywane recznie do planu z Librusa)
+  # ===========================================================================
+  - title: Zajęcia dodatkowe
+    path: zajecia-dodatkowe
+    icon: mdi:calendar-plus
+    type: panel
+    cards:
+      - type: vertical-stack
+        cards:
+          # --- Co jest zdefiniowane ---
+          - type: markdown
+            title: ➕ Zdefiniowane zajęcia dodatkowe
+            content: |
+              {%- set e = 'sensor.librus_imie_nazwisko_lekcje_dodatkowe' -%}
+              {%- set lista = state_attr(e, 'lekcje') or [] -%}
+              {%- if states(e) in ['unknown', 'unavailable'] -%}
+              Brak danych.
+              {%- elif not lista -%}
+              _Nie dodano jeszcze żadnych zajęć. Wypełnij formularz poniżej i naciśnij **Dodaj**._
+              {%- else -%}
+              {%- for l in lista %}
+              - **{{ l.przedmiot }}** · {{ l.termin }}{% if l.miejsce %} · {{ l.miejsce }}{% endif %}{% if l.powtarzanie == 'jednorazowo' %} _(jednorazowo)_{% endif %}
+              {%- endfor %}
+
+              _Zajęcia są dodawane do planu z Librusa (czujniki planu, kalendarz, koniec lekcji), oznaczone ➕._
+              {%- endif -%}
+
+          # --- Formularz dodawania ---
+          - type: entities
+            title: Dodaj zajęcia
+            show_header_toggle: false
+            entities:
+              - entity: text.librus_imie_nazwisko_lekcja_dodatkowa_nazwa
+                name: Nazwa zajęć
+              - entity: text.librus_imie_nazwisko_lekcja_dodatkowa_miejsce
+                name: Miejsce / sala (opcjonalnie)
+              - entity: select.librus_imie_nazwisko_lekcja_dodatkowa_powtarzanie
+                name: Powtarzanie
+              - entity: time.librus_imie_nazwisko_lekcja_dodatkowa_od
+                name: Od godziny
+              - entity: time.librus_imie_nazwisko_lekcja_dodatkowa_do
+                name: Do godziny
+          # dzien tygodnia - tylko dla zajec cotygodniowych
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: select.librus_imie_nazwisko_lekcja_dodatkowa_powtarzanie
+                state: co tydzień
+            card:
+              type: entities
+              show_header_toggle: false
+              entities:
+                - entity: select.librus_imie_nazwisko_lekcja_dodatkowa_dzien
+                  name: Dzień tygodnia
+          # data - tylko dla zajec jednorazowych
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: select.librus_imie_nazwisko_lekcja_dodatkowa_powtarzanie
+                state: jednorazowo
+            card:
+              type: entities
+              show_header_toggle: false
+              entities:
+                - entity: date.librus_imie_nazwisko_lekcja_dodatkowa_data
+                  name: Data
+          - type: button
+            entity: button.librus_imie_nazwisko_lekcja_dodatkowa_dodaj
+            name: Dodaj do planu
+            icon: mdi:plus-circle
+            show_state: false
+            tap_action:
+              action: perform-action
+              perform_action: button.press
+              target:
+                entity_id: button.librus_imie_nazwisko_lekcja_dodatkowa_dodaj
+
+          # --- Usuwanie ---
+          - type: entities
+            title: Usuń zajęcia
+            show_header_toggle: false
+            entities:
+              - entity: select.librus_imie_nazwisko_lekcja_dodatkowa_do_usuniecia
+                name: Wybierz zajęcia
+          - type: button
+            entity: button.librus_imie_nazwisko_lekcja_dodatkowa_usun
+            name: Usuń wybrane
+            icon: mdi:delete
+            show_state: false
+            tap_action:
+              action: perform-action
+              perform_action: button.press
+              target:
+                entity_id: button.librus_imie_nazwisko_lekcja_dodatkowa_usun
