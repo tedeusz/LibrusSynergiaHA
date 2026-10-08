@@ -31,7 +31,7 @@ views:
                 **{{ states(e) }}** lekcji · {{ state_attr(e, 'pierwsza_lekcja_od') }}–{{ state_attr(e, 'ostatnia_lekcja_do') }}
                 {%- endif -%}
               {%- endmacro -%}
-              {%- if state_attr(akt, 'numer') is not none -%}
+              {%- if state_attr(akt, 'od') -%}
               🟢 **Teraz:** {{ states(akt) }} ({{ state_attr(akt, 'od') }}–{{ state_attr(akt, 'do') }}){% if state_attr(akt, 'nastepna_lekcja') %} · następna: **{{ state_attr(akt, 'nastepna_lekcja') }}** o {{ state_attr(akt, 'nastepna_od') }}{% endif %}
               {%- elif state_attr(akt, 'nastepna_lekcja') -%}
               ⏸️ **Przerwa** · następna: **{{ state_attr(akt, 'nastepna_lekcja') }}** o {{ state_attr(akt, 'nastepna_od') }}
@@ -79,7 +79,7 @@ views:
               {%- if not tm.t and (x.numer | string) == (l.numer | string) %}{% set tm.t = '<br>📖 <i>' ~ x.temat ~ '</i>' %}{% endif %}
               {%- endfor %}
               {%- endif %}
-              {%- set trwa = (roznica == 0 and akt_nr is not none and (l.numer | string) == (akt_nr | string) and l.od == akt_od and not l.odwolana) %}
+              {%- set trwa = (roznica == 0 and akt_od and (l.numer | string) == (akt_nr | string) and l.od == akt_od and not l.odwolana) %}
               {%- if l.odwolana %}
               - ❌ **{{ '➕' if l.dodatkowa is defined and l.dodatkowa else l.numer }}** · {{ l.od }}–{{ l.do }} · ~~{{ l.przedmiot }}~~ _({{ l.zmiana | lower }})_
               {%- elif l.dodatkowa is defined and l.dodatkowa %}
