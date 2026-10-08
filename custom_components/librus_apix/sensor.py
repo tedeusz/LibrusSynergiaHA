@@ -652,6 +652,8 @@ class LibrusLekcjeDodatkoweSensor(_LibrusSensor):
                     "termin": LD.opis_terminu(l),
                     "dzien": LD.DNI_TYGODNIA[l["dzien"]] if l["powtarzanie"] != LD.JEDNORAZOWO else None,
                     "data": l.get("data"),
+                    "wazne_od": l.get("wazne_od"),
+                    "wazne_do": l.get("wazne_do"),
                     "od": l["od"],
                     "do": l["do"],
                     "miejsce": l.get("miejsce", ""),

@@ -1,4 +1,4 @@
-"""Przyciski formularza "Lekcja dodatkowa": dodaj, zapisz zmiany i usun."""
+"""Przyciski formularza "Lekcja dodatkowa": dodaj, zapisz zmiany, usun i wyczysc daty obowiazywania."""
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -18,6 +18,7 @@ async def async_setup_entry(
         LibrusPrzyciskDodaj(coordinator, config_entry),
         LibrusPrzyciskZapisz(coordinator, config_entry),
         LibrusPrzyciskUsun(coordinator, config_entry),
+        LibrusPrzyciskWyczyscDaty(coordinator, config_entry),
     ])
 
 
@@ -64,3 +65,15 @@ class LibrusPrzyciskZapisz(_Przycisk):
             await self.coordinator.async_zapisz_z_formularza()
         except ValueError as err:
             raise ServiceValidationError(str(err)) from err
+
+
+class LibrusPrzyciskWyczyscDaty(_Przycisk):
+    """Czysci pola "obowiazuje od/do" w formularzu (pola daty w interfejsie nie da sie oproznic inaczej)."""
+
+    def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(
+            coordinator, config_entry, "Lekcja dodatkowa - wyczyść daty obowiązywania", "wyczysc_daty", "mdi:calendar-remove"
+        )
+
+    async def async_press(self) -> None:
+        self.coordinator.wyczysc_daty_zakresu()

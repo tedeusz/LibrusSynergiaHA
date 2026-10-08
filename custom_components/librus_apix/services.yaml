@@ -248,6 +248,16 @@ dodaj_lekcje_dodatkowa:
       required: false
       selector:
         date:
+    wazne_od:
+      name: Obowiązuje od (zajęcia cotygodniowe, opcjonalnie)
+      required: false
+      selector:
+        date:
+    wazne_do:
+      name: Obowiązuje do, włącznie (zajęcia cykliczne, opcjonalnie)
+      required: false
+      selector:
+        date:
     miejsce:
       name: Miejsce lub prowadzący
       required: false
@@ -309,6 +319,16 @@ edytuj_lekcje_dodatkowa:
             - niedziela
     data:
       name: Data (dla zajęć jednorazowych albo pierwszych zajęć co 2 tygodnie)
+      required: false
+      selector:
+        date:
+    wazne_od:
+      name: Obowiązuje od (zajęcia cotygodniowe, opcjonalnie; w YAML pusty napis usuwa datę)
+      required: false
+      selector:
+        date:
+    wazne_do:
+      name: Obowiązuje do, włącznie (zajęcia cykliczne, opcjonalnie; w YAML pusty napis usuwa datę)
       required: false
       selector:
         date:

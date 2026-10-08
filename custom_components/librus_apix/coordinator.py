@@ -768,7 +768,9 @@ FORMULARZ_DOMYSLNY: Dict[str, Any] = {
     "miejsce": "",
     "powtarzanie": LD.COTYGODNIOWO,
     "dzien": 0,  # 0 = poniedzialek
-    "data": None,  # dla zajec jednorazowych
+    "data": None,  # dla zajec jednorazowych i co 2 tygodnie (pierwszy termin)
+    "wazne_od": None,  # opcjonalnie: zajecia co tydzien obowiazuja od tej daty
+    "wazne_do": None,  # opcjonalnie: zajecia cykliczne obowiazuja do tej daty (wlacznie)
     "od": "15:00",
     "do": "16:00",
 }
@@ -925,7 +927,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
 
     @staticmethod
     def _klucz_duplikatu(l: Dict[str, Any]) -> tuple:
-        return (l["przedmiot"].lower(), l["od"], l["do"], l["powtarzanie"], l.get("dzien"), l.get("data"))
+        return (l["przedmiot"].lower(), l["od"], l["do"], l["powtarzanie"], l.get("dzien"), l.get("data"),
+                l.get("wazne_od"), l.get("wazne_do"))
 
     def _jest_duplikatem(self, rekord: Dict[str, Any]) -> bool:
         return any(
@@ -939,10 +942,13 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
 
     async def async_dodaj_lekcje_dodatkowa(
         self, przedmiot: str, od: Any, do: Any, *, powtarzanie: str = LD.COTYGODNIOWO,
-        dzien: Any = None, data: Any = None, miejsce: str = "",
+        dzien: Any = None, data: Any = None, miejsce: str = "", wazne_od: Any = None, wazne_do: Any = None,
     ) -> Dict[str, Any]:
         """Dodaj lekcje dodatkowa; ValueError z czytelnym komunikatem przy blednych danych."""
-        rekord = LD.nowa_lekcja(przedmiot, od, do, powtarzanie=powtarzanie, dzien=dzien, data=data, miejsce=miejsce)
+        rekord = LD.nowa_lekcja(
+            przedmiot, od, do, powtarzanie=powtarzanie, dzien=dzien, data=data, miejsce=miejsce,
+            wazne_od=wazne_od, wazne_do=wazne_do,
+        )
         if self._jest_duplikatem(rekord):
             raise ValueError("Takie zajęcia są już dodane")
         self._dodatkowe.append(rekord)
@@ -999,6 +1005,12 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self.edytowana = None
         self.async_update_listeners()
 
+    def wyczysc_daty_zakresu(self) -> None:
+        """Usun daty "obowiazuje od/do" z formularza (pole daty w UI nie da sie wyczyscic inaczej)."""
+        self.formularz["wazne_od"] = None
+        self.formularz["wazne_do"] = None
+        self.async_update_listeners()
+
     def wczytaj_do_formularza(self, id: str) -> None:
         """Wpisz pola wybranych zajec do formularza i przejdz w tryb edycji."""
         l = self._znajdz_dodatkowa(id)
@@ -1010,6 +1022,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             "powtarzanie": l["powtarzanie"],
             "dzien": l["dzien"] if l["powtarzanie"] != LD.JEDNORAZOWO else FORMULARZ_DOMYSLNY["dzien"],
             "data": date.fromisoformat(l["data"]) if l["powtarzanie"] != LD.COTYGODNIOWO else None,
+            "wazne_od": date.fromisoformat(l["wazne_od"]) if l.get("wazne_od") else None,
+            "wazne_do": date.fromisoformat(l["wazne_do"]) if l.get("wazne_do") else None,
             "od": l["od"],
             "do": l["do"],
         }
@@ -1023,7 +1037,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         f = self.formularz
         rekord = await self.async_dodaj_lekcje_dodatkowa(
             f["przedmiot"], f["od"], f["do"], powtarzanie=f["powtarzanie"],
-            dzien=f["dzien"], data=f["data"], miejsce=f["miejsce"],
+            dzien=f["dzien"], data=f["data"], miejsce=f["miejsce"], wazne_od=f["wazne_od"], wazne_do=f["wazne_do"],
         )
         self.formularz["przedmiot"] = ""
         self.formularz["miejsce"] = ""
@@ -1040,7 +1054,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             self.edytowana, przedmiot=f["przedmiot"], od=f["od"], do=f["do"], powtarzanie=f["powtarzanie"],
             dzien=f["dzien"] if f["powtarzanie"] == LD.COTYGODNIOWO else None,
             data=f["data"] if f["powtarzanie"] != LD.COTYGODNIOWO else None,
-            miejsce=f["miejsce"] or "",
+            miejsce=f["miejsce"] or "", wazne_od=f["wazne_od"] or "", wazne_do=f["wazne_do"] or "",
         )
         self.wyczysc_formularz()
         return rekord

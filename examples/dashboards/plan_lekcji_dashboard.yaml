@@ -197,6 +197,31 @@ views:
             row:
               entity: date.librus_imie_nazwisko_lekcja_dodatkowa_data
               name: Data (przy „co 2 tygodnie” - pierwszy termin)
+          # Opcjonalny zakres obowiazywania zajec cyklicznych (puste = bez ograniczenia; przycisk czysci obie daty)
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: select.librus_imie_nazwisko_lekcja_dodatkowa_powtarzanie
+                state: co tydzień
+            row:
+              entity: date.librus_imie_nazwisko_lekcja_dodatkowa_obowiazuje_od
+              name: Obowiązuje od (opcjonalnie)
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: select.librus_imie_nazwisko_lekcja_dodatkowa_powtarzanie
+                state_not: jednorazowo
+            row:
+              entity: date.librus_imie_nazwisko_lekcja_dodatkowa_obowiazuje_do
+              name: Obowiązuje do (opcjonalnie)
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: select.librus_imie_nazwisko_lekcja_dodatkowa_powtarzanie
+                state_not: jednorazowo
+            row:
+              entity: button.librus_imie_nazwisko_lekcja_dodatkowa_wyczysc_daty_obowiazywania
+              name: Wyczyść daty obowiązywania
           - entity: time.librus_imie_nazwisko_lekcja_dodatkowa_od
             name: Od godziny
           - entity: time.librus_imie_nazwisko_lekcja_dodatkowa_do

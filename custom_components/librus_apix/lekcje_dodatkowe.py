@@ -72,6 +72,8 @@ def nowa_lekcja(
     miejsce: str = "",
     id: Optional[str] = None,
     odwolane: Optional[Iterable[Any]] = None,
+    wazne_od: Any = None,
+    wazne_do: Any = None,
 ) -> Dict[str, Any]:
     """Zwaliduj dane i zwroc rekord lekcji dodatkowej (ValueError z czytelnym komunikatem)."""
     przedmiot = " ".join(str(przedmiot or "").split())
@@ -112,16 +114,39 @@ def nowa_lekcja(
         if not 0 <= numer <= 6:
             raise ValueError("Dzień tygodnia musi być z zakresu 0 (pon) - 6 (niedz)")
         rekord["dzien"] = numer
+    # Zakres obowiazywania: "od" ma sens tylko przy zajeciach co tydzien (przy co 2 tygodnie poczatkiem jest data
+    # pierwszych zajec), "do" przy obu cyklicznych; zajecia jednorazowe maja jedna date
+    rekord["wazne_od"] = data_iso(wazne_od) if powtarzanie == COTYGODNIOWO else None
+    rekord["wazne_do"] = data_iso(wazne_do) if powtarzanie != JEDNORAZOWO else None
+    poczatek_zakresu = rekord["wazne_od"] if powtarzanie == COTYGODNIOWO else rekord.get("data")
+    if rekord["wazne_do"] and poczatek_zakresu and rekord["wazne_do"] < poczatek_zakresu:
+        raise ValueError("Data zakończenia zajęć nie może być wcześniejsza niż data ich rozpoczęcia")
     return rekord
+
+
+def _krotka(iso: str) -> str:
+    return f"{date.fromisoformat(iso):%d.%m}"
+
+
+def _do(l: Dict[str, Any]) -> str:
+    return f" do {_krotka(l['wazne_do'])}" if l.get("wazne_do") else ""
+
+
+def _zakres(l: Dict[str, Any]) -> str:
+    """" (od 01.10 do 20.12)" - tylko to, co ustawiono; pusty napis bez zakresu."""
+    od = f"od {_krotka(l['wazne_od'])}" if l.get("wazne_od") else ""
+    do = f"do {_krotka(l['wazne_do'])}" if l.get("wazne_do") else ""
+    return f" ({' '.join(x for x in (od, do) if x)})" if od or do else ""
 
 
 def opis_terminu(l: Dict[str, Any]) -> str:
     """"śr 16:00–17:00" albo "2026-10-15 16:00–17:00" - do list i etykiet."""
     if l["powtarzanie"] == CO_2_TYGODNIE:
         poczatek = date.fromisoformat(l["data"])
-        return f"co 2 tyg. {DNI_SKROT[l['dzien']]} {l['od']}–{l['do']} (od {poczatek:%d.%m})"
-    kiedy = l["data"] if l["powtarzanie"] == JEDNORAZOWO else DNI_SKROT[l["dzien"]]
-    return f"{kiedy} {l['od']}–{l['do']}"
+        return f"co 2 tyg. {DNI_SKROT[l['dzien']]} {l['od']}–{l['do']} (od {poczatek:%d.%m}{_do(l)})"
+    if l["powtarzanie"] == JEDNORAZOWO:
+        return f"{l['data']} {l['od']}–{l['do']}"
+    return f"{DNI_SKROT[l['dzien']]} {l['od']}–{l['do']}{_zakres(l)}"
 
 
 def etykiety(lekcje: List[Dict[str, Any]]) -> Dict[str, str]:
@@ -137,13 +162,20 @@ def etykiety(lekcje: List[Dict[str, Any]]) -> Dict[str, str]:
     return wynik
 
 
+def _w_zakresie(l: Dict[str, Any], dzien: date) -> bool:
+    """Czy dzien miesci sie w (opcjonalnym) zakresie obowiazywania zajec cyklicznych (obie granice wlacznie)."""
+    iso = dzien.isoformat()
+    return not (l.get("wazne_od") and iso < l["wazne_od"]) and not (l.get("wazne_do") and iso > l["wazne_do"])
+
+
 def pasuje(l: Dict[str, Any], dzien: date) -> bool:
     """Czy zajecia odbywaja sie danego dnia (z uwzglednieniem odwolanych terminow - te tez "pasuja")."""
     if l["powtarzanie"] == JEDNORAZOWO:
         return l["data"] == dzien.isoformat()
     if l["powtarzanie"] == CO_2_TYGODNIE:
-        return dzien >= date.fromisoformat(l["data"]) and (dzien - date.fromisoformat(l["data"])).days % 14 == 0
-    return l["dzien"] == dzien.weekday()
+        pierwszy = date.fromisoformat(l["data"])
+        return dzien >= pierwszy and (dzien - pierwszy).days % 14 == 0 and _w_zakresie(l, dzien)
+    return l["dzien"] == dzien.weekday() and _w_zakresie(l, dzien)
 
 
 def lekcje_na_dzien(lekcje: Iterable[Dict[str, Any]], dzien: date) -> List[Dict[str, Any]]:
@@ -206,12 +238,12 @@ def scal_plan(
 
 
 def usun_przedawnione(lekcje: List[Dict[str, Any]], dzis: date) -> List[Dict[str, Any]]:
-    """Odrzuc jednorazowe lekcje starsze niz PRZEDAWNIENIE_DNI i stare odwolane terminy; cotygodniowe zostaja."""
+    """Odrzuc lekcje zakonczone (jednorazowe albo z data zakonczenia) wczesniej niz PRZEDAWNIENIE_DNI dni temu i stare odwolane terminy."""
     granica = (dzis - timedelta(days=PRZEDAWNIENIE_DNI)).isoformat()
     return [
         {**l, "odwolane": [d for d in l.get("odwolane", []) if d >= granica]}
         for l in lekcje
-        if l["powtarzanie"] != JEDNORAZOWO or l["data"] >= granica
+        if (l["data"] if l["powtarzanie"] == JEDNORAZOWO else l.get("wazne_do") or "9999") >= granica
     ]
 
 
@@ -253,9 +285,9 @@ def ustaw_odwolanie(l: Dict[str, Any], data: Any, odwolana: bool = True) -> bool
 
 def zmien(
     l: Dict[str, Any], *, przedmiot: Any = None, od: Any = None, do: Any = None, powtarzanie: Any = None,
-    dzien: Any = None, data: Any = None, miejsce: Any = None,
+    dzien: Any = None, data: Any = None, miejsce: Any = None, wazne_od: Any = None, wazne_do: Any = None,
 ) -> Dict[str, Any]:
-    """Nowy rekord z zastosowanymi zmianami (None = bez zmian); zachowuje id i te odwolane terminy, ktore nadal pasuja."""
+    """Nowy rekord z zastosowanymi zmianami (None = bez zmian, "" przy wazne_od/wazne_do = usun date); zachowuje id i te odwolane terminy, ktore nadal pasuja."""
     nowy = nowa_lekcja(
         l["przedmiot"] if przedmiot is None else przedmiot,
         l["od"] if od is None else od,
@@ -265,6 +297,8 @@ def zmien(
         data=l.get("data") if data is None else data,
         miejsce=l.get("miejsce", "") if miejsce is None else miejsce,
         id=l["id"],
+        wazne_od=l.get("wazne_od") if wazne_od is None else wazne_od,
+        wazne_do=l.get("wazne_do") if wazne_do is None else wazne_do,
     )
     nowy["odwolane"] = [d for d in l.get("odwolane", []) if pasuje(nowy, date.fromisoformat(d))]
     return nowy
@@ -278,7 +312,7 @@ def z_zapisu(surowe: Any) -> List[Dict[str, Any]]:
             wynik.append(nowa_lekcja(
                 r["przedmiot"], r["od"], r["do"], powtarzanie=r.get("powtarzanie", COTYGODNIOWO),
                 dzien=r.get("dzien"), data=r.get("data"), miejsce=r.get("miejsce", ""), id=r.get("id"),
-                odwolane=r.get("odwolane"),
+                odwolane=r.get("odwolane"), wazne_od=r.get("wazne_od"), wazne_do=r.get("wazne_do"),
             ))
         except (KeyError, ValueError, TypeError, AttributeError):
             continue

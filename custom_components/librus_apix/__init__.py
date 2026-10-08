@@ -1171,6 +1171,7 @@ def _zarejestruj_uslugi_lekcji_dodatkowych(hass: HomeAssistant) -> None:
             await coordinator.async_dodaj_lekcje_dodatkowa(
                 d["przedmiot"], d["od"], d["do"], powtarzanie=d["powtarzanie"],
                 dzien=d.get("dzien"), data=d.get("data"), miejsce=d["miejsce"],
+                wazne_od=d.get("wazne_od"), wazne_do=d.get("wazne_do"),
             )
         except ValueError as err:
             raise ServiceValidationError(str(err)) from err
@@ -1196,6 +1197,8 @@ def _zarejestruj_uslugi_lekcji_dodatkowych(hass: HomeAssistant) -> None:
                     vol.Optional("powtarzanie", default="co_tydzien"): vol.In(list(POWTARZANIA)),
                     vol.Optional("dzien"): vol.Any(vol.Coerce(int), cv.string),
                     vol.Optional("data"): cv.date,
+                    vol.Optional("wazne_od"): cv.date,
+                    vol.Optional("wazne_do"): cv.date,
                     vol.Optional("miejsce", default=""): cv.string,
                     vol.Optional("config_entry_id"): str,
                 }
@@ -1211,6 +1214,7 @@ def _zarejestruj_uslugi_lekcji_dodatkowych(hass: HomeAssistant) -> None:
             await coordinator.async_edytuj_lekcje_dodatkowa(
                 d["id"], przedmiot=d.get("przedmiot"), od=d.get("od"), do=d.get("do"),
                 powtarzanie=d.get("powtarzanie"), dzien=d.get("dzien"), data=d.get("data"), miejsce=d.get("miejsce"),
+                wazne_od=d.get("wazne_od"), wazne_do=d.get("wazne_do"),
             )
         except ValueError as err:
             raise ServiceValidationError(str(err)) from err
@@ -1242,6 +1246,8 @@ def _zarejestruj_uslugi_lekcji_dodatkowych(hass: HomeAssistant) -> None:
                     vol.Optional("powtarzanie"): vol.In(list(POWTARZANIA)),
                     vol.Optional("dzien"): vol.Any(vol.Coerce(int), cv.string),
                     vol.Optional("data"): cv.date,
+                    vol.Optional("wazne_od"): vol.Any("", cv.date),  # "" = usuń datę
+                    vol.Optional("wazne_do"): vol.Any("", cv.date),
                     vol.Optional("miejsce"): cv.string,
                     vol.Optional("config_entry_id"): str,
                 }
