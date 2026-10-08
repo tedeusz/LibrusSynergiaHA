@@ -328,6 +328,16 @@ def _parse_date(value: Any) -> Optional[date]:
 # --- Plan lekcji -------------------------------------------------------------
 
 
+def _czysty_swap(wartosc: Any) -> str:
+    """"A -> B" z Librusa bez pustych stron: "[brak] -> [brak]" znaczy brak informacji (pusty napis),
+    a pojedyncze "[brak]" zamieniamy na "brak"."""
+    tekst = str(wartosc or "").strip()
+    strony = [x.strip() for x in tekst.split("->")]
+    if all(x in ("", "[brak]") for x in strony):
+        return ""
+    return " -> ".join("brak" if x == "[brak]" else x for x in strony)
+
+
 def _build_plan(periods: Any) -> Dict[str, List[Dict[str, Any]]]:
     """Zamien liste Period na slownik {data ISO: [lekcje]} (puste okienka pomijane)."""
     plan: Dict[str, List[Dict[str, Any]]] = {}
@@ -353,8 +363,9 @@ def _build_plan(periods: Any) -> Dict[str, List[Dict[str, Any]]]:
                 ("subject_swap", "przedmiot_zastepczy"),
                 ("classroom_swap", "sala_zastepcza"),
             ):
-                if szczegoly.get(zrodlo):
-                    lekcja[cel] = szczegoly[zrodlo]
+                wartosc = _czysty_swap(szczegoly.get(zrodlo))
+                if wartosc:
+                    lekcja[cel] = wartosc
         lekcje.append(lekcja)
     for lekcje in plan.values():
         lekcje.sort(key=lambda l: l["numer"])
