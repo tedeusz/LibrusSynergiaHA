@@ -17,6 +17,8 @@ views:
               {%- set n = lek | length -%}
               {%- set num = states('sensor.librus_imie_nazwisko_szczesliwy_numerek') -%}
               {%- if lek %}{{ n }} {{ 'lekcja' if n == 1 else ('lekcje' if n % 10 in [2, 3, 4] and n % 100 not in [12, 13, 14] else 'lekcji') }} · {{ lek[0].od }}–{{ lek[-1].do }}{% else %}Dziś bez lekcji{% endif %} · 🍀 numerek {{ num }}{{ ' – TO NUMER UCZNIA! 🎉' if num == (state_attr('sensor.librus_imie_nazwisko_informacje_o_uczniu', 'numer_w_klasie') | string) else '' }}
+              {%- set fr = states('sensor.librus_imie_nazwisko_frekwencja') | float(none) -%}
+              {%- if fr is not none %} · ✅ frekwencja {{ '%g' | format(fr | round(1)) }}%{% endif %}
           - type: custom:mushroom-template-card
             primary: >-
               {%- set lek = (state_attr('sensor.librus_imie_nazwisko_plan_lekcji_dzis', 'lekcje') or []) | rejectattr('odwolana') | list -%}
@@ -43,7 +45,8 @@ views:
               {%- set nl = states('sensor.librus_imie_nazwisko_plan_lekcji_nastepny_dzien') | int(0) -%}
               {%- set nast_txt = nast ~ ': ' ~ nl ~ ' ' ~ ('lekcja' if nl == 1 else ('lekcje' if nl % 10 in [2, 3, 4] and nl % 100 not in [12, 13, 14] else 'lekcji')) ~ ' od ' ~ state_attr('sensor.librus_imie_nazwisko_plan_lekcji_nastepny_dzien', 'pierwsza_lekcja_od') if dnast and state_attr('sensor.librus_imie_nazwisko_plan_lekcji_nastepny_dzien', 'pierwsza_lekcja_od') else '' -%}
               {%- if etap == 'trwa' %}{{ trwa[0].numer }}. lekcja, do {{ trwa[0].do }}{{ ' · potem ' ~ dalej[0].przedmiot ~ ' o ' ~ dalej[0].od if dalej else ' · to ostatnia lekcja' }}
-              {%- elif etap in ('przerwa', 'przed') %}Najpierw: {{ dalej[0].numer }}. {{ dalej[0].przedmiot }} o {{ dalej[0].od }}
+              {%- elif etap == 'przerwa' %}Potem: {{ dalej[0].numer }}. {{ dalej[0].przedmiot }} o {{ dalej[0].od }}
+              {%- elif etap == 'przed' %}Pierwsza: {{ dalej[0].numer }}. {{ dalej[0].przedmiot }}
               {%- elif etap == 'po' %}Koniec o {{ lek[-1].do }}{{ ' · ' ~ nast_txt if nast_txt else '' }}
               {%- else %}{{ nast_txt }}{% endif %}
               {%- if zm %} · 🔄 zmiany: {{ zm }}{% endif %}{%- if od %} · ❌ odwołane: {{ od | length }}{% endif %}
@@ -138,16 +141,6 @@ views:
                 tap_action:
                   action: navigate
                   navigation_path: /librus-oceny/1
-              - type: template
-                icon: >-
-                  mdi:account-check
-                icon_color: >-
-                  green
-                content: >-
-                  {{ states('sensor.librus_imie_nazwisko_frekwencja') | float(0) | round(1) }}%
-                tap_action:
-                  action: navigate
-                  navigation_path: /librus-frekwencja/0
       - type: grid
         columns: 2
         square: false
