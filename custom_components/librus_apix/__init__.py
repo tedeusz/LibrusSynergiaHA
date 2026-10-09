@@ -867,12 +867,26 @@ class LibrusApiClient:
             for msg in messages
         ]
 
-    async def async_get_message_content(self, href: str):
-        """Pobierz tresc wiadomosci. UWAGA: otwiera wiadomosc w Librusie (oznacza jako przeczytana)."""
+    async def async_get_message_content(self, href: str, wyslane: bool = False):
+        """Pobierz tresc wiadomosci (wyslane=True: ze skrzynki nadawczej).
+
+        UWAGA: odebrana wiadomosc zostaje otwarta w Librusie (oznaczona jako przeczytana).
+        """
         from librus_apix.messages import message_content
 
+        class _Skrzynka:
+            """Klient z adresem wiadomosci skierowanym na skrzynke nadawcza (biblioteka zna tylko odebrane)."""
+
+            def __init__(self, client):
+                self._client = client
+                self.MESSAGE_URL = client.SEND_MESSAGE_URL
+
+            def __getattr__(self, nazwa):
+                return getattr(self._client, nazwa)
+
         data = await self._async_call(
-            "message content", lambda client: message_content(client, href)
+            "message content",
+            lambda client: message_content(_Skrzynka(client) if wyslane else client, href),
         )
         return data.content if data else None
 
@@ -1141,6 +1155,7 @@ _USLUGI = {
     "pobierz_tresc": ("async_pobierz_tresc", "indeks", None),
     "przegladaj": ("async_przegladaj", "kierunek", _KIERUNKI),
     "przegladaj_wyslane": ("async_przegladaj_wyslane", "kierunek", _KIERUNKI),
+    "otworz_wyslana": ("async_otworz_wyslana", "indeks", None),
     "przegladaj_ogloszenia": ("async_przegladaj_ogloszenia", "kierunek", _KIERUNKI),
     "otworz_ogloszenie": ("async_otworz_ogloszenie", "indeks", None),
     "przegladaj_terminarz": ("async_przegladaj_terminarz", "kierunek", _KIERUNKI),

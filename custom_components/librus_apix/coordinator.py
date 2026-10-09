@@ -814,6 +814,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._wysl_strona = 0
         self._wysl_przesuniecie = 0
         self._wysl_lista: Optional[List[Dict[str, Any]]] = None
+        self._wysl_otwarta: Optional[Dict[str, Any]] = None  # wyslana wiadomosc kliknieta na liscie (z trescia)
         self._ogl_przesuniecie = 0
         self._ogl_otwarte: Optional[Dict[str, Any]] = None  # ogloszenie kliknięte na liscie (cala tresc)
         self._term_przesuniecie = 0
@@ -1464,6 +1465,41 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             if strona == 0 and przes == 0:
                 lista = None  # wracamy do zywego widoku najnowszych
             self._wysl_strona, self._wysl_przesuniecie, self._wysl_lista = strona, przes, lista
+        self.async_update_listeners()
+        return True
+
+    async def async_otworz_wyslana(self, indeks: int) -> bool:
+        """Pobierz (raz, na stale) i pokaz tresc wyslanej wiadomosci z pozycji `indeks` biezacego ekranu.
+
+        Otwarcie wlasnej wyslanej wiadomosci nie zmienia nic u odbiorcy.
+        """
+        async with self._api_lock:
+            lista = self.widok_wyslanych()["wiadomosci"]
+            if not 0 <= indeks < len(lista):
+                _LOGGER.warning("Brak wyslanej wiadomosci na pozycji %s", indeks)
+                return False
+            msg = lista[indeks]
+            klucz = "wyslane|" + (msg.get("href") or f"{msg['odbiorca']}|{msg['temat']}|{msg['data']}")
+            if klucz not in self._tresci:
+                if not msg.get("href"):
+                    return False
+                try:
+                    surowa = await self.client.async_get_message_content(msg["href"], wyslane=True)
+                except Exception as err:
+                    _LOGGER.warning("Pobranie tresci wyslanej wiadomosci nie powiodlo sie: %s", err)
+                    return False
+                tresc = _czysta_tresc(surowa)
+                if not tresc:
+                    return False
+                self._tresci[klucz] = tresc
+                self._zapisz_tresci()
+            self._wysl_otwarta = {
+                "odbiorca": msg.get("odbiorca", ""),
+                "temat": msg.get("temat", ""),
+                "data": msg.get("data", ""),
+                "ma_zalacznik": msg.get("ma_zalacznik", False),
+                "tresc": self._tresci[klucz],
+            }
         self.async_update_listeners()
         return True
 

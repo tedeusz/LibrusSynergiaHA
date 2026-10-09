@@ -848,7 +848,7 @@ class LibrusOgloszeniaSensor(_LibrusSensor):
 class LibrusWyslaneSensor(_LibrusSensor):
     """Wiadomosci wyslane (stan = liczba na ostatnio pobranej stronie Librusa; lista z paginacja w atrybutach)."""
 
-    _unrecorded_attributes = frozenset({"przegladanie"})
+    _unrecorded_attributes = frozenset({"przegladanie", "otwarta"})
 
     def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
         super().__init__(coordinator, config_entry, "Wiadomosci wyslane", "wiadomosci_wyslane", "mdi:email-send-outline")
@@ -862,7 +862,11 @@ class LibrusWyslaneSensor(_LibrusSensor):
     @property
     def extra_state_attributes(self) -> Dict[str, Any]:
         # Aktualny ekran przegladania (usluga librus_apix.przegladaj_wyslane)
-        return {"przegladanie": self.coordinator.widok_wyslanych()}
+        return {
+            "przegladanie": self.coordinator.widok_wyslanych(),
+            # Ostatnio kliknieta wyslana wiadomosc z trescia - usluga librus_apix.otworz_wyslana
+            "otwarta": self.coordinator._wysl_otwarta or {},
+        }
 
 
 def _uwaga_kompakt(u: Dict[str, Any]) -> Dict[str, Any]:

@@ -30,7 +30,7 @@ Nazwy encji zależą od nazwy ucznia, np. `sensor.librus_<imie_nazwisko>_oceny`.
 | `sensor.librus_..._srednia_ocen`, `..._srednia_<przedmiot>` | Średnie (`state_class: measurement`, wykres historii) |
 | `sensor.librus_..._<przedmiot>` | Oceny z danego przedmiotu |
 | `sensor.librus_..._wiadomosci` | Wiadomości (liczba nieprzeczytanych; atrybuty: lista, otwarta wiadomość, ekran przeglądania) |
-| `sensor.librus_..._wiadomosci_wyslane` | Wiadomości wysłane (atrybut `przegladanie`: ekran po 5 pozycji z odbiorcą, tematem i datą) |
+| `sensor.librus_..._wiadomosci_wyslane` | Wiadomości wysłane (atrybuty: `przegladanie` – ekran po 5 pozycji z odbiorcą, tematem i datą; `otwarta` – kliknięta wiadomość z treścią) |
 | `sensor.librus_..._plan_lekcji_dzis`, `..._plan_lekcji_nastepny_dzien`, `..._plan_lekcji_tydzien` | Plan lekcji na dziś, następny dzień nauki i tydzień (z przeglądaniem tygodni) |
 | `sensor.librus_..._lekcje_dodatkowe` | Zajęcia dodatkowe dopisane ręcznie (liczba; atrybuty: `lekcje` z `id`, terminem, miejscem i `odwolane_terminy`, `dzis` oraz `terminy` z najbliższych 3 tygodni) |
 | `text.`, `select.`, `time.`, `date.`, `button.librus_..._lekcja_dodatkowa_*` | Formularz dodawania, edycji i usuwania zajęć dodatkowych w UI: pola `..._nazwa`, `..._miejsce`, `..._powtarzanie`, `..._dzien`, `..._data`, `..._obowiazuje_od`, `..._obowiazuje_do`, `..._od`, `..._do`, lista `..._edycja`, przyciski `..._dodaj`, `..._zapisz_zmiany`, `..._usun`, `..._wyczysc_daty_obowiazywania` i lista `..._do_usuniecia` (patrz niżej) |
@@ -80,6 +80,7 @@ Usługi przesuwają ekran listy (atrybut `przegladanie` odpowiedniego sensora) i
 | Usługa | Opis |
 |--------|------|
 | `librus_apix.przegladaj` | Lista wiadomości (przechodzi też do starszych stron Librusa) |
+| `librus_apix.otworz_wyslana` | Treść wysłanej wiadomości z pozycji ekranu (pobierana raz, zapisywana) |
 | `librus_apix.przegladaj_wyslane` | Lista wysłanych (ekran po 5 pozycji; starsze strony z Librusa, `najnowsze` odświeża listę) |
 | `librus_apix.pobierz_tresc` | Pobiera i zapisuje treść wiadomości z podanej pozycji listy (`indeks`) |
 | `librus_apix.przegladaj_ogloszenia` | Lista ogłoszeń (ekran po 5 pozycji) |

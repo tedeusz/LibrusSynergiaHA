@@ -65,6 +65,27 @@ przegladaj_wyslane:
       selector:
         text:
 
+otworz_wyslana:
+  name: Otwórz wysłaną wiadomość
+  description: >
+    Pobiera (raz, zapisuje na stałe) i pokazuje treść wysłanej wiadomości z podanej pozycji bieżącego ekranu.
+    Nie zmienia nic u odbiorcy.
+  fields:
+    indeks:
+      name: Pozycja na ekranie
+      description: Numer wiadomości na wyświetlanej liście wysłanych (0 = pierwsza).
+      required: true
+      example: 0
+      selector:
+        number:
+          min: 0
+          max: 50
+    config_entry_id:
+      name: Wpis integracji
+      required: false
+      selector:
+        text:
+
 przegladaj_ogloszenia:
   name: Przeglądaj ogłoszenia
   description: Przesuwa ekran listy ogłoszeń szkoły o 5 pozycji (bez zapytań do Librusa).
