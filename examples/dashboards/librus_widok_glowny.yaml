@@ -1,18 +1,184 @@
 # Widok główny z kafelkami przechodzącymi do pozostałych dashboardów.
-# Wymaga: HA 2023.1+. Ścieżki /librus-.../0 dopasuj do nazw swoich pulpitów
+# Wymaga: HA 2023.1+ oraz mushroom-cards (HACS) dla karty ze stanem na górze. Ścieżki /librus-.../0 dopasuj do nazw swoich pulpitów
 # (adres pulpitu = ścieżka po / w pasku adresu przeglądarki).
 # Nazwy encji: zamień "librus_imie_nazwisko" na swoje (Narzędzia deweloperskie → Stany).
 views:
   - title: Librus
     cards:
-      - type: entities
-        entities:
-          - entity: sensor.librus_imie_nazwisko_frekwencja
-            name: Frekwencja
-          - entity: sensor.librus_imie_nazwisko_aktualna_lekcja
-            name: Aktualna lekcja
-          - entity: sensor.librus_imie_nazwisko_szczesliwy_numerek
-            name: Szczęśliwy numerek
+      # Stan na górze: data i plan dnia, co dzieje się teraz, liczniki spraw do załatwienia i lista konkretów
+      - type: vertical-stack
+        cards:
+          - type: custom:mushroom-title-card
+            title: >-
+              {%- set n = now() -%}
+              {{ ['poniedziałek','wtorek','środa','czwartek','piątek','sobota','niedziela'][n.weekday()] | capitalize }}, {{ n.day }} {{ ['stycznia','lutego','marca','kwietnia','maja','czerwca','lipca','sierpnia','września','października','listopada','grudnia'][n.month - 1] }}
+            subtitle: >-
+              {%- set lek = (state_attr('sensor.librus_imie_nazwisko_plan_lekcji_dzis', 'lekcje') or []) | rejectattr('odwolana') | list -%}
+              {%- set n = lek | length -%}
+              {%- set num = states('sensor.librus_imie_nazwisko_szczesliwy_numerek') -%}
+              {%- if lek %}{{ n }} {{ 'lekcja' if n == 1 else ('lekcje' if n % 10 in [2, 3, 4] and n % 100 not in [12, 13, 14] else 'lekcji') }} · {{ lek[0].od }}–{{ lek[-1].do }}{% else %}Dziś bez lekcji{% endif %} · 🍀 numerek {{ num }}{{ ' – TO NUMER UCZNIA! 🎉' if num == (state_attr('sensor.librus_imie_nazwisko_informacje_o_uczniu', 'numer_w_klasie') | string) else '' }}
+          - type: custom:mushroom-template-card
+            primary: >-
+              {%- set lek = (state_attr('sensor.librus_imie_nazwisko_plan_lekcji_dzis', 'lekcje') or []) | rejectattr('odwolana') | list -%}
+              {%- set t = now().strftime('%H:%M') -%}
+              {%- set trwa = lek | selectattr('od', 'le', t) | selectattr('do', 'gt', t) | list -%}
+              {%- set dalej = lek | selectattr('od', 'gt', t) | list -%}
+              {%- set etap = 'trwa' if trwa else ('przerwa' if dalej and lek and t >= lek[0].od else ('przed' if dalej else ('po' if lek else 'wolne'))) -%}
+              {%- if etap == 'trwa' %}{{ trwa[0].przedmiot }}
+              {%- elif etap == 'przerwa' %}Przerwa
+              {%- elif etap == 'przed' %}Lekcje zaczną się o {{ lek[0].od }}
+              {%- elif etap == 'po' %}Lekcje na dziś skończone
+              {%- else %}Dziś bez lekcji{% endif %}
+            secondary: >-
+              {%- set lek = (state_attr('sensor.librus_imie_nazwisko_plan_lekcji_dzis', 'lekcje') or []) | rejectattr('odwolana') | list -%}
+              {%- set t = now().strftime('%H:%M') -%}
+              {%- set trwa = lek | selectattr('od', 'le', t) | selectattr('do', 'gt', t) | list -%}
+              {%- set dalej = lek | selectattr('od', 'gt', t) | list -%}
+              {%- set etap = 'trwa' if trwa else ('przerwa' if dalej and lek and t >= lek[0].od else ('przed' if dalej else ('po' if lek else 'wolne'))) -%}
+              {%- set zm = lek | selectattr('zmiana') | list | length -%}
+              {%- set od = state_attr('sensor.librus_imie_nazwisko_plan_lekcji_dzis', 'odwolane') or [] -%}
+              {%- set dnast = state_attr('sensor.librus_imie_nazwisko_plan_lekcji_nastepny_dzien', 'data') -%}
+              {%- set dd = (as_datetime(dnast).date() - now().date()).days if dnast else 0 -%}
+              {%- set nast = ('Jutro' if dd == 1 else ['Pon','Wt','Śr','Czw','Pt','Sob','Niedz'][as_datetime(dnast).weekday()]) if dnast else '' -%}
+              {%- set nl = states('sensor.librus_imie_nazwisko_plan_lekcji_nastepny_dzien') | int(0) -%}
+              {%- set nast_txt = nast ~ ': ' ~ nl ~ ' ' ~ ('lekcja' if nl == 1 else ('lekcje' if nl % 10 in [2, 3, 4] and nl % 100 not in [12, 13, 14] else 'lekcji')) ~ ' od ' ~ state_attr('sensor.librus_imie_nazwisko_plan_lekcji_nastepny_dzien', 'pierwsza_lekcja_od') if dnast and state_attr('sensor.librus_imie_nazwisko_plan_lekcji_nastepny_dzien', 'pierwsza_lekcja_od') else '' -%}
+              {%- if etap == 'trwa' %}{{ trwa[0].numer }}. lekcja, do {{ trwa[0].do }}{{ ' · potem ' ~ dalej[0].przedmiot ~ ' o ' ~ dalej[0].od if dalej else ' · to ostatnia lekcja' }}
+              {%- elif etap in ('przerwa', 'przed') %}Najpierw: {{ dalej[0].numer }}. {{ dalej[0].przedmiot }} o {{ dalej[0].od }}
+              {%- elif etap == 'po' %}Koniec o {{ lek[-1].do }}{{ ' · ' ~ nast_txt if nast_txt else '' }}
+              {%- else %}{{ nast_txt }}{% endif %}
+              {%- if zm %} · 🔄 zmiany: {{ zm }}{% endif %}{%- if od %} · ❌ odwołane: {{ od | length }}{% endif %}
+            icon: >-
+              {%- set lek = (state_attr('sensor.librus_imie_nazwisko_plan_lekcji_dzis', 'lekcje') or []) | rejectattr('odwolana') | list -%}
+              {%- set t = now().strftime('%H:%M') -%}
+              {%- set trwa = lek | selectattr('od', 'le', t) | selectattr('do', 'gt', t) | list -%}
+              {%- set dalej = lek | selectattr('od', 'gt', t) | list -%}
+              {%- set etap = 'trwa' if trwa else ('przerwa' if dalej and lek and t >= lek[0].od else ('przed' if dalej else ('po' if lek else 'wolne'))) -%}
+              {%- if etap == 'trwa' %}mdi:school{% elif etap == 'przerwa' %}mdi:coffee{% elif etap == 'przed' %}mdi:clock-outline{% elif etap == 'po' %}mdi:check-circle-outline{% else %}mdi:sleep{% endif %}
+            icon_color: >-
+              {%- set lek = (state_attr('sensor.librus_imie_nazwisko_plan_lekcji_dzis', 'lekcje') or []) | rejectattr('odwolana') | list -%}
+              {%- set t = now().strftime('%H:%M') -%}
+              {%- set trwa = lek | selectattr('od', 'le', t) | selectattr('do', 'gt', t) | list -%}
+              {%- set dalej = lek | selectattr('od', 'gt', t) | list -%}
+              {%- set etap = 'trwa' if trwa else ('przerwa' if dalej and lek and t >= lek[0].od else ('przed' if dalej else ('po' if lek else 'wolne'))) -%}
+              {%- if etap == 'trwa' %}green{% elif etap == 'przerwa' %}amber{% elif etap == 'przed' %}blue{% else %}grey{% endif %}
+            layout: horizontal
+            tap_action:
+              action: navigate
+              navigation_path: /librus-plan-lekcji/0
+          - type: custom:mushroom-chips-card
+            alignment: center
+            chips:
+              - type: template
+                icon: >-
+                  {% if states('sensor.librus_imie_nazwisko_wiadomosci') | int(0) > 0 %}mdi:email-alert{% else %}mdi:email-outline{% endif %}
+                icon_color: >-
+                  {% if states('sensor.librus_imie_nazwisko_wiadomosci') | int(0) > 0 %}red{% else %}grey{% endif %}
+                content: >-
+                  {% if states('sensor.librus_imie_nazwisko_wiadomosci') | int(0) > 0 %}{{ states('sensor.librus_imie_nazwisko_wiadomosci') }}{% endif %}
+                tap_action:
+                  action: navigate
+                  navigation_path: /librus-wiadomosci/0
+              - type: template
+                icon: >-
+                  mdi:bullhorn
+                icon_color: >-
+                  {% if is_state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'sa_nowe', true) %}orange{% else %}grey{% endif %}
+                content: >-
+                  {% if is_state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'sa_nowe', true) %}nowe{% endif %}
+                tap_action:
+                  action: navigate
+                  navigation_path: /librus-overview/szkola
+              - type: template
+                icon: >-
+                  mdi:notebook-edit
+                icon_color: >-
+                  {% if (state_attr('sensor.librus_imie_nazwisko_zadania_domowe', 'liczba_na_dzis') | int(0)) + (state_attr('sensor.librus_imie_nazwisko_zadania_domowe', 'liczba_na_jutro') | int(0)) > 0 %}orange{% else %}grey{% endif %}
+                content: >-
+                  {% set d = state_attr('sensor.librus_imie_nazwisko_zadania_domowe', 'liczba_na_dzis') | int(0) %}{% set j = state_attr('sensor.librus_imie_nazwisko_zadania_domowe', 'liczba_na_jutro') | int(0) %}{% if d %}dziś {{ d }}{% endif %}{% if d and j %} · {% endif %}{% if j %}jutro {{ j }}{% endif %}
+                tap_action:
+                  action: navigate
+                  navigation_path: /librus-zadania/0
+              - type: template
+                icon: >-
+                  mdi:file-document-edit-outline
+                icon_color: >-
+                  {% set t = (state_attr('sensor.librus_imie_nazwisko_terminarz', 'najblizsze_testy') or [])[0] if state_attr('sensor.librus_imie_nazwisko_terminarz', 'najblizsze_testy') else none %}{% if t and t.dni_do <= 1 %}red{% elif t and t.dni_do <= 3 %}orange{% elif t %}blue{% else %}grey{% endif %}
+                content: >-
+                  {% set t = (state_attr('sensor.librus_imie_nazwisko_terminarz', 'najblizsze_testy') or [])[0] if state_attr('sensor.librus_imie_nazwisko_terminarz', 'najblizsze_testy') else none %}{% if t %}{{ t.etykieta_dnia | lower }}{% endif %}
+                tap_action:
+                  action: navigate
+                  navigation_path: /librus-terminarz/0
+              - type: template
+                icon: >-
+                  mdi:account-alert
+                icon_color: >-
+                  {% if is_state_attr('sensor.librus_imie_nazwisko_nieobecnosci', 'sa_nowe_wpisy', true) %}red{% elif states('sensor.librus_imie_nazwisko_nieobecnosci') | int(0) > 0 %}amber{% else %}grey{% endif %}
+                content: >-
+                  {% if states('sensor.librus_imie_nazwisko_nieobecnosci') | int(0) > 0 %}{{ states('sensor.librus_imie_nazwisko_nieobecnosci') }}{% endif %}
+                tap_action:
+                  action: navigate
+                  navigation_path: /librus-frekwencja/0
+              - type: template
+                icon: >-
+                  mdi:star-circle
+                icon_color: >-
+                  {% if (state_attr('sensor.librus_imie_nazwisko_oceny', 'podsumowanie') or {}).liczba_nowych | default(0) > 0 %}green{% else %}grey{% endif %}
+                content: >-
+                  {% set n = (state_attr('sensor.librus_imie_nazwisko_oceny', 'podsumowanie') or {}).liczba_nowych | default(0) %}{% if n > 0 %}{{ n }}{% endif %}
+                tap_action:
+                  action: navigate
+                  navigation_path: /librus-oceny/0
+              - type: template
+                icon: >-
+                  mdi:clipboard-alert-outline
+                icon_color: >-
+                  {% if is_state_attr('sensor.librus_imie_nazwisko_uwagi', 'sa_nowe', true) or is_state_attr('sensor.librus_imie_nazwisko_zachowanie', 'sa_nowe', true) %}orange{% else %}grey{% endif %}
+                content: >-
+                  {% if is_state_attr('sensor.librus_imie_nazwisko_uwagi', 'sa_nowe', true) or is_state_attr('sensor.librus_imie_nazwisko_zachowanie', 'sa_nowe', true) %}nowe{% endif %}
+                tap_action:
+                  action: navigate
+                  navigation_path: /librus-oceny/1
+              - type: template
+                icon: >-
+                  mdi:account-check
+                icon_color: >-
+                  green
+                content: >-
+                  {{ states('sensor.librus_imie_nazwisko_frekwencja') | float(0) | round(1) }}%
+                tap_action:
+                  action: navigate
+                  navigation_path: /librus-frekwencja/0
+          - type: markdown
+            title: Na uwadze
+            content: |-
+              {%- set d = state_attr('sensor.librus_imie_nazwisko_zadania_domowe', 'na_dzis') or [] -%}
+              {%- set j = state_attr('sensor.librus_imie_nazwisko_zadania_domowe', 'na_jutro') or [] -%}
+              {%- set testy = (state_attr('sensor.librus_imie_nazwisko_terminarz', 'najblizsze_testy') or []) | selectattr('dni_do', 'le', 7) | list -%}
+              {%- set wiad = (state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'wiadomosci') or []) | selectattr('nieprzeczytana') | list -%}
+              {%- set ogl = (state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'ogloszenia') or [])[:5] | selectattr('jest_nowe') | list -%}
+              {%- set oceny = ((state_attr('sensor.librus_imie_nazwisko_oceny', 'przegladanie') or {}).oceny or []) | selectattr('jest_nowa') | list -%}
+              {%- if d or j or testy or wiad or ogl or oceny -%}
+              {%- if d %}
+              - 📝 **Zadania na dziś:** {{ d | join(', ') }}
+              {%- endif %}
+              {%- if j %}
+              - 📝 **Zadania na jutro:** {{ j | join(', ') }}
+              {%- endif %}
+              {%- for t in testy %}
+              - {{ t.ikona }} **{{ t.etykieta_dnia }}** · {{ t.etykieta }}: {{ t.opis }}
+              {%- endfor %}
+              {%- for m in wiad %}
+              - 📬 **{{ m.temat }}** · {{ m.nadawca }}
+              {%- endfor %}
+              {%- for o in ogl %}
+              - 📢 **{{ o.tytul }}**
+              {%- endfor %}
+              {%- for o in oceny[:3] %}
+              - {{ o.ikona }} **{{ o.ocena }}** · {{ o.przedmiot }}{{ ' · ' ~ o.kategoria if o.kategoria else '' }}
+              {%- endfor %}
+              {%- else -%}
+              ✅ Nic pilnego.
+              {%- endif -%}
       - type: grid
         columns: 2
         square: false
