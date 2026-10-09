@@ -58,8 +58,9 @@ views:
               _Oceny {{ p.od }}–{{ p.do }} z {{ p.razem }}{{ ' (najnowsze)' if p.najnowsze else '' }}_
               {%- for o in lista %}
               {%- set roznica = (dzis - as_datetime(o.data_iso).date()).days if o.data_iso else none %}
-              {%- set kiedy = 'dziś' if roznica == 0 else 'wczoraj' if roznica == 1 else roznica ~ ' dni temu' if roznica is not none and roznica < 14 else o.data %}
-              - {{ o.ikona }} **{{ o.ocena if o.ocena | length <= 8 else 'opisowa' }}** · {{ o.przedmiot }}{% if o.kategoria %} · {{ o.kategoria }}{% endif %}{% if o.waga and not o.opisowa %} · waga {{ o.waga }}{% endif %} · _{{ kiedy }}_{{ ' 🆕' if o.jest_nowa else '' }}{{ ' · nie liczy się' if o.liczy_sie == false else '' }}{% if o.komentarz %}<br>💬 {{ o.komentarz | replace('\r', ' ') | replace('\n', ' ') | truncate(200) }}{% endif %}
+              {%- set kiedy = ('dziś' if roznica == 0 else 'wczoraj' if roznica == 1 else roznica ~ ' dni temu') if roznica is not none and 0 <= roznica < 14 else '' %}
+              {%- set dm = (o.data_iso[8:10] ~ '.' ~ o.data_iso[5:7] ~ '.' ~ o.data_iso[0:4]) if o.data_iso else o.data %}
+              - {{ o.ikona }} **{{ o.ocena if o.ocena | length <= 8 else 'opisowa' }}** · {{ o.przedmiot }}{% if o.kategoria %} · {{ o.kategoria }}{% endif %}{% if o.waga and not o.opisowa %} · waga {{ o.waga }}{% endif %} · _{{ dm }}{{ ' (' ~ kiedy ~ ')' if kiedy else '' }}_{{ ' 🆕' if o.jest_nowa else '' }}{{ ' · nie liczy się' if o.liczy_sie == false else '' }}{% if o.komentarz %}<br>💬 {{ o.komentarz | replace('\r', ' ') | replace('\n', ' ') | truncate(200) }}{% endif %}
               {%- endfor %}
               {%- endif -%}
           - type: horizontal-stack

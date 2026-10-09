@@ -171,6 +171,7 @@
         title: "⭐ Nowa ocena: {{ trigger.event.data.przedmiot }} – {{ trigger.event.data.ocena }}"
         message: >-
           {{ trigger.event.data.kategoria }}
+          {%- set d = trigger.event.data.data %}{% if d %} · {{ d[8:10] }}.{{ d[5:7] }}.{{ d[0:4] }}{% endif %}
           {%- if trigger.event.data.waga %} · waga {{ trigger.event.data.waga }}{% endif %}
           {%- if trigger.event.data.liczy_sie == false %} · nie liczy się do średniej{% endif %}
           {%- if trigger.event.data.komentarz %} · {{ trigger.event.data.komentarz }}{% endif %}
