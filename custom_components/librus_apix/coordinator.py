@@ -1480,25 +1480,27 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 return False
             msg = lista[indeks]
             klucz = "wyslane|" + (msg.get("href") or f"{msg['odbiorca']}|{msg['temat']}|{msg['data']}")
-            if klucz not in self._tresci:
+            tresc = self._tresci.get(klucz, "")
+            if not tresc:
                 if not msg.get("href"):
-                    return False
-                try:
-                    surowa = await self.client.async_get_message_content(msg["href"], wyslane=True)
-                except Exception as err:
-                    _LOGGER.warning("Pobranie tresci wyslanej wiadomosci nie powiodlo sie: %s", err)
-                    return False
-                tresc = _czysta_tresc(surowa)
-                if not tresc:
-                    return False
-                self._tresci[klucz] = tresc
-                self._zapisz_tresci()
+                    _LOGGER.warning("Wyslana wiadomosc „%s” nie ma linku w liscie Librusa - nie da sie pobrac tresci", msg.get("temat"))
+                else:
+                    try:
+                        tresc = _czysta_tresc(await self.client.async_get_message_content(msg["href"], wyslane=True))
+                    except Exception as err:
+                        _LOGGER.warning("Pobranie tresci wyslanej wiadomosci (%s) nie powiodlo sie: %s", msg["href"], err)
+                if tresc:
+                    self._tresci[klucz] = tresc
+                    self._zapisz_tresci()
+                else:
+                    _LOGGER.warning("Brak tresci wyslanej wiadomosci „%s” (link %s)", msg.get("temat"), msg.get("href"))
+                    tresc = "⚠️ Nie udało się pobrać treści tej wiadomości (szczegóły w logu Home Assistanta)."
             self._wysl_otwarta = {
                 "odbiorca": msg.get("odbiorca", ""),
                 "temat": msg.get("temat", ""),
                 "data": msg.get("data", ""),
                 "ma_zalacznik": msg.get("ma_zalacznik", False),
-                "tresc": self._tresci[klucz],
+                "tresc": tresc,
             }
         self.async_update_listeners()
         return True

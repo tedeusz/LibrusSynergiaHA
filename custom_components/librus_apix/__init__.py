@@ -590,6 +590,32 @@ CONFIG_SCHEMA = vol.Schema(
 )
 
 
+def _pobierz_liste_wyslanych(client, strona: int):
+    """Strona skrzynki nadawczej jako obiekty z polami author/title/date/href/unread/has_attachment."""
+    from types import SimpleNamespace
+    from bs4 import BeautifulSoup
+    from librus_apix.helpers import no_access_check
+    from .wyslane import parsuj_liste
+
+    odp = client.post(client.SEND_MESSAGE_URL, data={"numer_strony105": strona, "porcjowanie_pojemnik105": "105"})
+    soup = no_access_check(BeautifulSoup(odp.text, "lxml"))
+    return [SimpleNamespace(unread=False, **m) for m in parsuj_liste(soup)]
+
+
+def _tresc_wyslanej(client, href: str):
+    """Tresc wyslanej wiadomosci spod adresu z linku listy; None (z ostrzezeniem w logu), gdy jej nie znaleziono."""
+    from bs4 import BeautifulSoup
+    from librus_apix.helpers import no_access_check
+    from .wyslane import adres_tresci, parsuj_tresc
+
+    adres = adres_tresci(client.BASE_URL, client.SEND_MESSAGE_URL, href)
+    soup = no_access_check(BeautifulSoup(client.get(adres).text, "lxml"))
+    tresc = parsuj_tresc(soup)
+    if tresc is None:
+        _LOGGER.warning("Wyslana wiadomosc %s: nie znaleziono tresci na stronie", adres)
+    return tresc
+
+
 class LibrusApiClient:
     """Class to interface with the Librus API."""
 
@@ -843,10 +869,12 @@ class LibrusApiClient:
         Przy bledzie innym niz TokenError zwraca None bez resetu sesji (funkcja jest wolana
         co kilka minut, wiec nie moze wymuszac ponownego logowania ani zasmiecac logu bledami).
         """
-        from librus_apix.messages import get_received, get_sent
+        from librus_apix.messages import get_received
 
         def _fetch(client):
-            return ((get_sent if wyslane else get_received)(client, page) or [])[:count]
+            if wyslane:
+                return _pobierz_liste_wyslanych(client, page)[:count]
+            return (get_received(client, page) or [])[:count]
 
         messages = await self._async_call("messages", _fetch)
         if messages is None:
@@ -874,20 +902,10 @@ class LibrusApiClient:
         """
         from librus_apix.messages import message_content
 
-        class _Skrzynka:
-            """Klient z adresem wiadomosci skierowanym na skrzynke nadawcza (biblioteka zna tylko odebrane)."""
+        if wyslane:
+            return await self._async_call("sent message content", lambda client: _tresc_wyslanej(client, href))
 
-            def __init__(self, client):
-                self._client = client
-                self.MESSAGE_URL = client.SEND_MESSAGE_URL
-
-            def __getattr__(self, nazwa):
-                return getattr(self._client, nazwa)
-
-        data = await self._async_call(
-            "message content",
-            lambda client: message_content(_Skrzynka(client) if wyslane else client, href),
-        )
+        data = await self._async_call("message content", lambda client: message_content(client, href))
         return data.content if data else None
 
     async def async_get_homework(self):
