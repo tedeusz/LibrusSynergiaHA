@@ -73,16 +73,6 @@ views:
             chips:
               - type: template
                 icon: >-
-                  {% if states('sensor.librus_imie_nazwisko_wiadomosci') | int(0) > 0 %}mdi:email-alert{% else %}mdi:email-outline{% endif %}
-                icon_color: >-
-                  {% if states('sensor.librus_imie_nazwisko_wiadomosci') | int(0) > 0 %}red{% else %}grey{% endif %}
-                content: >-
-                  {% if states('sensor.librus_imie_nazwisko_wiadomosci') | int(0) > 0 %}{{ states('sensor.librus_imie_nazwisko_wiadomosci') }}{% endif %}
-                tap_action:
-                  action: navigate
-                  navigation_path: /librus-wiadomosci/0
-              - type: template
-                icon: >-
                   mdi:bullhorn
                 icon_color: >-
                   {% if is_state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'sa_nowe', true) %}orange{% else %}grey{% endif %}
@@ -93,14 +83,14 @@ views:
                   navigation_path: /librus-overview/szkola
               - type: template
                 icon: >-
-                  mdi:notebook-edit
+                  {% if states('sensor.librus_imie_nazwisko_wiadomosci') | int(0) > 0 %}mdi:email-alert{% else %}mdi:email-outline{% endif %}
                 icon_color: >-
-                  {% if (state_attr('sensor.librus_imie_nazwisko_zadania_domowe', 'liczba_na_dzis') | int(0)) + (state_attr('sensor.librus_imie_nazwisko_zadania_domowe', 'liczba_na_jutro') | int(0)) > 0 %}orange{% else %}grey{% endif %}
+                  {% if states('sensor.librus_imie_nazwisko_wiadomosci') | int(0) > 0 %}red{% else %}grey{% endif %}
                 content: >-
-                  {% set d = state_attr('sensor.librus_imie_nazwisko_zadania_domowe', 'liczba_na_dzis') | int(0) %}{% set j = state_attr('sensor.librus_imie_nazwisko_zadania_domowe', 'liczba_na_jutro') | int(0) %}{% if d %}dziś {{ d }}{% endif %}{% if d and j %} · {% endif %}{% if j %}jutro {{ j }}{% endif %}
+                  {% if states('sensor.librus_imie_nazwisko_wiadomosci') | int(0) > 0 %}{{ states('sensor.librus_imie_nazwisko_wiadomosci') }}{% endif %}
                 tap_action:
                   action: navigate
-                  navigation_path: /librus-zadania/0
+                  navigation_path: /librus-wiadomosci/0
               - type: template
                 icon: >-
                   mdi:file-document-edit-outline
@@ -110,7 +100,7 @@ views:
                   {% set t = (state_attr('sensor.librus_imie_nazwisko_terminarz', 'najblizsze_testy') or [])[0] if state_attr('sensor.librus_imie_nazwisko_terminarz', 'najblizsze_testy') else none %}{% if t %}{{ t.etykieta_dnia | lower }}{% endif %}
                 tap_action:
                   action: navigate
-                  navigation_path: /librus-terminarz/0
+                  navigation_path: /librus-sprawdziany/0
               - type: template
                 icon: >-
                   mdi:account-alert
@@ -121,6 +111,16 @@ views:
                 tap_action:
                   action: navigate
                   navigation_path: /librus-frekwencja/0
+              - type: template
+                icon: >-
+                  mdi:notebook-edit
+                icon_color: >-
+                  {% if (state_attr('sensor.librus_imie_nazwisko_zadania_domowe', 'liczba_na_dzis') | int(0)) + (state_attr('sensor.librus_imie_nazwisko_zadania_domowe', 'liczba_na_jutro') | int(0)) > 0 %}orange{% else %}grey{% endif %}
+                content: >-
+                  {% set d = state_attr('sensor.librus_imie_nazwisko_zadania_domowe', 'liczba_na_dzis') | int(0) %}{% set j = state_attr('sensor.librus_imie_nazwisko_zadania_domowe', 'liczba_na_jutro') | int(0) %}{% if d %}dziś {{ d }}{% endif %}{% if d and j %} · {% endif %}{% if j %}jutro {{ j }}{% endif %}
+                tap_action:
+                  action: navigate
+                  navigation_path: /librus-zadania/0
               - type: template
                 icon: >-
                   mdi:star-circle
