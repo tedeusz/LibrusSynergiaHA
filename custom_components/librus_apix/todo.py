@@ -25,6 +25,14 @@ async def async_setup_entry(
     async_add_entities([LibrusTerminyZajec(coordinator, config_entry)])
 
 
+_DNI = ("pon", "wt", "śr", "czw", "pt", "sob", "niedz")
+
+
+def _dzien(iso: str) -> str:
+    d = date.fromisoformat(iso)
+    return f"{_DNI[d.weekday()]} {d.day:02d}.{d.month:02d}"
+
+
 class LibrusTerminyZajec(LibrusEntityMixin, CoordinatorEntity, TodoListEntity):
     """Terminy zajec dodatkowych z tygodnia pokazanego w planie (podaza za stronicowaniem); zaznaczony termin = odwolany."""
 
@@ -40,10 +48,11 @@ class LibrusTerminyZajec(LibrusEntityMixin, CoordinatorEntity, TodoListEntity):
         return [
             TodoItem(
                 uid=t["klucz"],
-                # sekcja "Ukonczone" to wbudowany napis karty HA - dlatego odwolanie opisujemy tez w tresci pozycji
-                summary=f"{t['przedmiot']} · {t['od']}–{t['do']}" + (" · odwołane" if t["odwolana"] else ""),
+                # sekcja "Ukonczone" to wbudowany napis karty HA - dlatego odwolanie opisujemy tez w tresci pozycji;
+                # date podajemy w tresci, a nie w polu "due": karta HA liczy date bez godziny wzgledem KONCA tego dnia,
+                # wiec wczorajsze zajecia pokazywala jako "13 godzin temu"
+                summary=f"{t['przedmiot']} · {_dzien(t['data'])} · {t['od']}–{t['do']}" + (" · odwołane" if t["odwolana"] else ""),
                 status=TodoItemStatus.COMPLETED if t["odwolana"] else TodoItemStatus.NEEDS_ACTION,
-                due=date.fromisoformat(t["data"]),
                 description=t["miejsce"] or None,
             )
             for t in self.coordinator.terminy_dodatkowych()
