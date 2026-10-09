@@ -53,8 +53,11 @@ def _wiadomosc_id(msg: Dict[str, Any]) -> Any:
     return msg.get("href") or (msg.get("author", ""), msg.get("title", ""), msg.get("date", ""))
 
 
-def _czysta_tresc(text: Any, limit: int = 2000) -> str:
-    """Tresc wiadomosci: zbij spacje w liniach, zostaw akapity, przytnij do `limit` znakow."""
+_STARY_LIMIT_TRESCI = 2000  # dawniej tresc byla przycinana do tylu znakow ("…" na koncu); zapisane takie sa pobierane od nowa
+
+
+def _czysta_tresc(text: Any, limit: Optional[int] = None) -> str:
+    """Tresc wiadomosci: zbij spacje w liniach, zostaw akapity; `limit` (domyslnie brak) przycina do tylu znakow."""
     wynik: List[str] = []
     pusta = False
     for linia in str(text or "").replace("\r", "\n").split("\n"):
@@ -67,7 +70,12 @@ def _czysta_tresc(text: Any, limit: int = 2000) -> str:
         pusta = False
         wynik.append(linia)
     tekst = "\n".join(wynik).strip()
-    return tekst if len(tekst) <= limit else tekst[: limit - 1].rstrip() + "…"
+    return tekst if not limit or len(tekst) <= limit else tekst[: limit - 1].rstrip() + "…"
+
+
+def _obcieta_dawniej(tresc: str) -> bool:
+    """Czy zapisana tresc to wersja przycieta starym limitem (wtedy trzeba ja pobrac jeszcze raz)."""
+    return len(tresc) == _STARY_LIMIT_TRESCI and tresc.endswith("…")
 
 
 def _tresc_klucz(msg: Dict[str, Any]) -> str:
@@ -891,7 +899,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             if not msg.get("href") or not self._nadawca_pasuje(msg):
                 continue
             klucz = _tresc_klucz(msg)
-            if klucz not in self._tresci:
+            if klucz not in self._tresci or _obcieta_dawniej(self._tresci[klucz]):
                 if pobrano >= MAX_TRESCI_NA_CYKL:
                     break
                 pobrano += 1
@@ -1481,7 +1489,8 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             msg = lista[indeks]
             klucz = "wyslane|" + (msg.get("href") or f"{msg['odbiorca']}|{msg['temat']}|{msg['data']}")
             tresc = self._tresci.get(klucz, "")
-            if not tresc:
+            if not tresc or _obcieta_dawniej(tresc):
+                stara, tresc = tresc, ""
                 if not msg.get("href"):
                     _LOGGER.warning("Wyslana wiadomosc „%s” nie ma linku w liscie Librusa - nie da sie pobrac tresci", msg.get("temat"))
                 else:
@@ -1494,7 +1503,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                     self._zapisz_tresci()
                 else:
                     _LOGGER.warning("Brak tresci wyslanej wiadomosci „%s” (link %s)", msg.get("temat"), msg.get("href"))
-                    tresc = "⚠️ Nie udało się pobrać treści tej wiadomości (szczegóły w logu Home Assistanta)."
+                    tresc = stara or "⚠️ Nie udało się pobrać treści tej wiadomości (szczegóły w logu Home Assistanta)."
             self._wysl_otwarta = {
                 "odbiorca": msg.get("odbiorca", ""),
                 "temat": msg.get("temat", ""),
@@ -1518,7 +1527,7 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 return False
             msg = lista[indeks]
             klucz = _tresc_klucz(msg)
-            if klucz not in self._tresci:
+            if klucz not in self._tresci or _obcieta_dawniej(self._tresci[klucz]):
                 if not msg.get("href"):
                     return False
                 try:
