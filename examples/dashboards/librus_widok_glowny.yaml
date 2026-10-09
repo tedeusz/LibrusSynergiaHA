@@ -5,7 +5,7 @@
 views:
   - title: Librus
     cards:
-      # Stan na górze: data i plan dnia, co dzieje się teraz, liczniki spraw do załatwienia i lista konkretów
+      # Stan na górze: data i plan dnia, co dzieje się teraz i znaczniki spraw do załatwienia (czerwony/pomarańczowy = coś wisi)
       - type: vertical-stack
         cards:
           - type: custom:mushroom-title-card
@@ -148,37 +148,6 @@ views:
                 tap_action:
                   action: navigate
                   navigation_path: /librus-frekwencja/0
-          - type: markdown
-            title: Na uwadze
-            content: |-
-              {%- set d = state_attr('sensor.librus_imie_nazwisko_zadania_domowe', 'na_dzis') or [] -%}
-              {%- set j = state_attr('sensor.librus_imie_nazwisko_zadania_domowe', 'na_jutro') or [] -%}
-              {%- set testy = (state_attr('sensor.librus_imie_nazwisko_terminarz', 'najblizsze_testy') or []) | selectattr('dni_do', 'le', 7) | list -%}
-              {%- set wiad = (state_attr('sensor.librus_imie_nazwisko_wiadomosci', 'wiadomosci') or []) | selectattr('nieprzeczytana') | list -%}
-              {%- set ogl = (state_attr('sensor.librus_imie_nazwisko_ogloszenia', 'ogloszenia') or [])[:5] | selectattr('jest_nowe') | list -%}
-              {%- set oceny = ((state_attr('sensor.librus_imie_nazwisko_oceny', 'przegladanie') or {}).oceny or []) | selectattr('jest_nowa') | list -%}
-              {%- if d or j or testy or wiad or ogl or oceny -%}
-              {%- if d %}
-              - 📝 **Zadania na dziś:** {{ d | join(', ') }}
-              {%- endif %}
-              {%- if j %}
-              - 📝 **Zadania na jutro:** {{ j | join(', ') }}
-              {%- endif %}
-              {%- for t in testy %}
-              - {{ t.ikona }} **{{ t.etykieta_dnia }}** · {{ t.etykieta }}: {{ t.opis }}
-              {%- endfor %}
-              {%- for m in wiad %}
-              - 📬 **{{ m.temat }}** · {{ m.nadawca }}
-              {%- endfor %}
-              {%- for o in ogl %}
-              - 📢 **{{ o.tytul }}**
-              {%- endfor %}
-              {%- for o in oceny[:3] %}
-              - {{ o.ikona }} **{{ o.ocena }}** · {{ o.przedmiot }}{{ ' · ' ~ o.kategoria if o.kategoria else '' }}
-              {%- endfor %}
-              {%- else -%}
-              ✅ Nic pilnego.
-              {%- endif -%}
       - type: grid
         columns: 2
         square: false
