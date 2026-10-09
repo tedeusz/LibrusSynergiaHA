@@ -837,16 +837,16 @@ class LibrusApiClient:
         html = getattr(self, "_ostatnia_strona_ocen", "") or ""
         return _diagnostyka_ocen(html, wynik, _current_semester(), getattr(self, "_info_pobrania_ocen", ""), getattr(self, "_gateway_ocen", None))
 
-    async def async_get_messages(self, count: int = 10, page: int = 0):
-        """Pobierz najnowsze wiadomosci (nadawca, temat, data) - bez tresci, zeby nie oznaczac ich jako przeczytane.
+    async def async_get_messages(self, count: int = 10, page: int = 0, wyslane: bool = False):
+        """Pobierz najnowsze wiadomosci (wyslane=True: skrzynka nadawcza; w polu "author" jest wtedy odbiorca) (nadawca, temat, data) - bez tresci, zeby nie oznaczac ich jako przeczytane.
 
         Przy bledzie innym niz TokenError zwraca None bez resetu sesji (funkcja jest wolana
         co kilka minut, wiec nie moze wymuszac ponownego logowania ani zasmiecac logu bledami).
         """
-        from librus_apix.messages import get_received
+        from librus_apix.messages import get_received, get_sent
 
         def _fetch(client):
-            return (get_received(client, page) or [])[:count]
+            return ((get_sent if wyslane else get_received)(client, page) or [])[:count]
 
         messages = await self._async_call("messages", _fetch)
         if messages is None:
@@ -1140,6 +1140,7 @@ _KIERUNKI = ["nastepna", "poprzednia", "najnowsze"]
 _USLUGI = {
     "pobierz_tresc": ("async_pobierz_tresc", "indeks", None),
     "przegladaj": ("async_przegladaj", "kierunek", _KIERUNKI),
+    "przegladaj_wyslane": ("async_przegladaj_wyslane", "kierunek", _KIERUNKI),
     "przegladaj_ogloszenia": ("async_przegladaj_ogloszenia", "kierunek", _KIERUNKI),
     "otworz_ogloszenie": ("async_otworz_ogloszenie", "indeks", None),
     "przegladaj_terminarz": ("async_przegladaj_terminarz", "kierunek", _KIERUNKI),

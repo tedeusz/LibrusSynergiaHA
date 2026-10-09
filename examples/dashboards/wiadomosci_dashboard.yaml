@@ -130,3 +130,89 @@ views:
               _Kliknij wiadomość na liście powyżej, aby pobrać i zobaczyć jej treść. Strzałkami przejdziesz do starszych._
               _(Uwaga: otwarcie oznacza wiadomość w Librusie jako przeczytaną.)_
               {%- endif -%}
+  # Druga zakładka: wiadomości wysłane (lista z paginacją po 5; "Najnowsze" odświeża listę z Librusa)
+  - title: Wysłane
+    path: wyslane
+    icon: mdi:email-send-outline
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: custom:mushroom-title-card
+            title: 📤 Wiadomości wysłane
+            subtitle: >
+              {% set p = (state_attr('sensor.librus_imie_nazwisko_wiadomosci_wyslane', 'przegladanie') or {}) %}
+              {% if p.najnowsze %}najnowsze{% else %}strona {{ p.strona }}, pozycje {{ p.od }}–{{ p.do }}{% endif %}
+          - type: custom:mushroom-template-card
+            primary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci_wyslane', 'przegladanie') or {}).wiadomosci or [])[0] | default({}) %}{{ m.temat | default('— brak —') }}
+            secondary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci_wyslane', 'przegladanie') or {}).wiadomosci or [])[0] | default({}) %}{% if m.odbiorca %}Do: {{ m.odbiorca }}{% endif %}{% if m.data %} · {{ m.data }}{% endif %}
+            icon: mdi:email-send-outline
+            icon_color: grey
+            badge_icon: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci_wyslane', 'przegladanie') or {}).wiadomosci or [])[0] | default({}) %}{% if m.ma_zalacznik %}mdi:paperclip{% endif %}
+          - type: custom:mushroom-template-card
+            primary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci_wyslane', 'przegladanie') or {}).wiadomosci or [])[1] | default({}) %}{{ m.temat | default('— brak —') }}
+            secondary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci_wyslane', 'przegladanie') or {}).wiadomosci or [])[1] | default({}) %}{% if m.odbiorca %}Do: {{ m.odbiorca }}{% endif %}{% if m.data %} · {{ m.data }}{% endif %}
+            icon: mdi:email-send-outline
+            icon_color: grey
+            badge_icon: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci_wyslane', 'przegladanie') or {}).wiadomosci or [])[1] | default({}) %}{% if m.ma_zalacznik %}mdi:paperclip{% endif %}
+          - type: custom:mushroom-template-card
+            primary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci_wyslane', 'przegladanie') or {}).wiadomosci or [])[2] | default({}) %}{{ m.temat | default('— brak —') }}
+            secondary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci_wyslane', 'przegladanie') or {}).wiadomosci or [])[2] | default({}) %}{% if m.odbiorca %}Do: {{ m.odbiorca }}{% endif %}{% if m.data %} · {{ m.data }}{% endif %}
+            icon: mdi:email-send-outline
+            icon_color: grey
+            badge_icon: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci_wyslane', 'przegladanie') or {}).wiadomosci or [])[2] | default({}) %}{% if m.ma_zalacznik %}mdi:paperclip{% endif %}
+          - type: custom:mushroom-template-card
+            primary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci_wyslane', 'przegladanie') or {}).wiadomosci or [])[3] | default({}) %}{{ m.temat | default('— brak —') }}
+            secondary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci_wyslane', 'przegladanie') or {}).wiadomosci or [])[3] | default({}) %}{% if m.odbiorca %}Do: {{ m.odbiorca }}{% endif %}{% if m.data %} · {{ m.data }}{% endif %}
+            icon: mdi:email-send-outline
+            icon_color: grey
+            badge_icon: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci_wyslane', 'przegladanie') or {}).wiadomosci or [])[3] | default({}) %}{% if m.ma_zalacznik %}mdi:paperclip{% endif %}
+          - type: custom:mushroom-template-card
+            primary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci_wyslane', 'przegladanie') or {}).wiadomosci or [])[4] | default({}) %}{{ m.temat | default('— brak —') }}
+            secondary: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci_wyslane', 'przegladanie') or {}).wiadomosci or [])[4] | default({}) %}{% if m.odbiorca %}Do: {{ m.odbiorca }}{% endif %}{% if m.data %} · {{ m.data }}{% endif %}
+            icon: mdi:email-send-outline
+            icon_color: grey
+            badge_icon: >
+              {% set m = ((state_attr('sensor.librus_imie_nazwisko_wiadomosci_wyslane', 'przegladanie') or {}).wiadomosci or [])[4] | default({}) %}{% if m.ma_zalacznik %}mdi:paperclip{% endif %}
+          - type: horizontal-stack
+            cards:
+              - type: custom:mushroom-template-card
+                primary: Nowsze
+                icon: mdi:chevron-left
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_wyslane
+                  data:
+                    kierunek: poprzednia
+              - type: custom:mushroom-template-card
+                primary: Najnowsze
+                icon: mdi:page-first
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_wyslane
+                  data:
+                    kierunek: najnowsze
+              - type: custom:mushroom-template-card
+                primary: Starsze
+                icon: mdi:chevron-right
+                layout: vertical
+                tap_action:
+                  action: perform-action
+                  perform_action: librus_apix.przegladaj_wyslane
+                  data:
+                    kierunek: nastepna

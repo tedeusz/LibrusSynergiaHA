@@ -810,6 +810,10 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self._strona = 0
         self._przesuniecie = 0
         self._widok_lista: Optional[List[Dict[str, Any]]] = None
+        # Wyslane: strona 0 pobierana przy pelnym odswiezeniu (self.data["wyslane"]); starsze strony na zadanie
+        self._wysl_strona = 0
+        self._wysl_przesuniecie = 0
+        self._wysl_lista: Optional[List[Dict[str, Any]]] = None
         self._ogl_przesuniecie = 0
         self._ogl_otwarte: Optional[Dict[str, Any]] = None  # ogloszenie kliknięte na liscie (cala tresc)
         self._term_przesuniecie = 0
@@ -1403,6 +1407,66 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
         self.async_update_listeners()
         return True
 
+    def _wyslane_baza(self) -> List[Dict[str, Any]]:
+        return (self.data or {}).get("wyslane") or []
+
+    def widok_wyslanych(self) -> Dict[str, Any]:
+        """Ekran wyslanych (ROZMIAR_WIDOKU sztuk): najnowsze albo starsze po przegladaniu."""
+        lista = self._wyslane_baza() if self._wysl_lista is None else self._wysl_lista
+        czesc = lista[self._wysl_przesuniecie : self._wysl_przesuniecie + ROZMIAR_WIDOKU]
+        return {
+            "strona": self._wysl_strona + 1,
+            "od": self._wysl_przesuniecie + 1 if czesc else 0,
+            "do": self._wysl_przesuniecie + len(czesc),
+            "najnowsze": self._wysl_lista is None,
+            "wiadomosci": czesc,
+        }
+
+    async def _pobierz_strone_wyslanych(self, strona: int) -> Optional[List[Dict[str, Any]]]:
+        messages = await self.client.async_get_messages(count=WIADOMOSCI_NA_STRONE, page=strona, wyslane=True)
+        return None if messages is None else self._build_wyslane(messages)
+
+    async def async_przegladaj_wyslane(self, kierunek: str) -> bool:
+        """Przesun ekran wyslanych o ROZMIAR_WIDOKU: "nastepna" (starsze), "poprzednia" (nowsze), "najnowsze".
+
+        "najnowsze" pobiera strone 0 od nowa (odswieza liste). Wiadomosci nie sa otwierane.
+        """
+        async with self._api_lock:
+            strona, przes, lista = self._wysl_strona, self._wysl_przesuniecie, self._wysl_lista
+            if kierunek == "najnowsze":
+                swieze = await self._pobierz_strone_wyslanych(0)
+                if swieze is not None:
+                    self.data = {**(self.data or {}), "wyslane": swieze}
+                strona, przes, lista = 0, 0, None
+            elif kierunek == "nastepna":
+                if lista is None:
+                    lista = self._wyslane_baza()
+                if przes + ROZMIAR_WIDOKU < len(lista):
+                    przes += ROZMIAR_WIDOKU
+                else:
+                    nowa = await self._pobierz_strone_wyslanych(strona + 1)
+                    if not nowa or (lista and nowa[0].get("href") == lista[0].get("href")):
+                        return False  # to byla ostatnia strona
+                    strona, przes, lista = strona + 1, 0, nowa
+            elif kierunek == "poprzednia":
+                if przes >= ROZMIAR_WIDOKU:
+                    przes -= ROZMIAR_WIDOKU
+                elif strona > 0:
+                    nowa = await self._pobierz_strone_wyslanych(strona - 1)
+                    if not nowa:
+                        return False
+                    strona, lista = strona - 1, nowa
+                    przes = ((len(nowa) - 1) // ROZMIAR_WIDOKU) * ROZMIAR_WIDOKU
+                else:
+                    return False
+            else:
+                return False
+            if strona == 0 and przes == 0:
+                lista = None  # wracamy do zywego widoku najnowszych
+            self._wysl_strona, self._wysl_przesuniecie, self._wysl_lista = strona, przes, lista
+        self.async_update_listeners()
+        return True
+
     async def async_pobierz_tresc(self, indeks: int) -> bool:
         """Pobierz (raz, na stale) i pokaz tresc wiadomosci z pozycji `indeks` na liscie.
 
@@ -1574,6 +1638,11 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             if grades == [] and (self.data or {}).get("oceny"):
                 grades = None  # pusta lista przy poprzednich ocenach = chwilowy blad pobierania
             messages = await self.client.async_get_messages(count=10)
+            try:
+                wyslane_raw = await self.client.async_get_messages(count=WIADOMOSCI_NA_STRONE, page=0, wyslane=True)
+            except Exception as err:  # wyslane sa dodatkiem - nigdy nie psuja reszty odswiezenia
+                _LOGGER.debug("Pobranie wyslanych nie powiodlo sie: %s", err)
+                wyslane_raw = None
             homework_raw = await self.client.async_get_homework()
             schedule_raw = await self.client.async_get_schedule()
             plan_raw = await self.client.async_get_timetable()
@@ -1645,6 +1714,11 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                         else prev.get("terminarz", [])
                     ),
                     "semestr_biezacy": current_sem,
+                    "wyslane": (
+                        self._build_wyslane(wyslane_raw)
+                        if isinstance(wyslane_raw, list)
+                        else prev.get("wyslane", [])
+                    ),
                     **dodatkowe,
                 }
                 await self._dodaj_szczegoly_zadan(result)
@@ -1665,6 +1739,11 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
                 "zadania": zadania,
                 "terminarz": terminarz,
                 "semestr_biezacy": current_sem,
+                "wyslane": (
+                    self._build_wyslane(wyslane_raw)
+                    if isinstance(wyslane_raw, list)
+                    else prev.get("wyslane", [])
+                ),
                 **dodatkowe,
             }
             await self._dodaj_szczegoly_zadan(result)
@@ -1887,6 +1966,19 @@ class LibrusDataUpdateCoordinator(DataUpdateCoordinator):
             msg["tresc"] = self._tresci.get(_tresc_klucz(msg), "")
             result.append(msg)
         return result
+
+    def _build_wyslane(self, messages: Optional[List[Dict]]) -> List[Dict]:
+        """Wiadomosci wyslane: odbiorca zamiast nadawcy, bez znacznikow nowosci/nieprzeczytania."""
+        return [
+            {
+                "odbiorca": m.get("author", ""),
+                "temat": m.get("title", ""),
+                "data": m.get("date", ""),
+                "href": m.get("href", ""),
+                "ma_zalacznik": m.get("has_attachment", False),
+            }
+            for m in messages or []
+        ]
 
     def _build_zadania(self, homework_raw) -> List[Dict]:
         """Przetworz liste Homework na liste dict, posortowana po terminie."""

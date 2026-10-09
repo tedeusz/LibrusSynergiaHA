@@ -70,6 +70,7 @@ async def async_setup_entry(
         LibrusSzczesliwyNumerekSensor(coordinator, config_entry),
         LibrusOcenySensor(coordinator, config_entry),
         LibrusWiadomosciSensor(coordinator, config_entry),
+        LibrusWyslaneSensor(coordinator, config_entry),
         LibrusZadaniaSensor(coordinator, config_entry),
         LibrusTerminarzSensor(coordinator, config_entry),
         LibrusPlanLekcjiSensor(coordinator, config_entry, "dzis"),
@@ -842,6 +843,26 @@ class LibrusOgloszeniaSensor(_LibrusSensor):
             # Ostatnio kliknięte ogloszenie z cala trescia - usluga librus_apix.otworz_ogloszenie
             "otwarte": self.coordinator._ogl_otwarte or {},
         }
+
+
+class LibrusWyslaneSensor(_LibrusSensor):
+    """Wiadomosci wyslane (stan = liczba na ostatnio pobranej stronie Librusa; lista z paginacja w atrybutach)."""
+
+    _unrecorded_attributes = frozenset({"przegladanie"})
+
+    def __init__(self, coordinator: LibrusDataUpdateCoordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator, config_entry, "Wiadomosci wyslane", "wiadomosci_wyslane", "mdi:email-send-outline")
+
+    @property
+    def native_value(self) -> Optional[int]:
+        if "wyslane" not in self._data:
+            return None
+        return len(self._data["wyslane"])
+
+    @property
+    def extra_state_attributes(self) -> Dict[str, Any]:
+        # Aktualny ekran przegladania (usluga librus_apix.przegladaj_wyslane)
+        return {"przegladanie": self.coordinator.widok_wyslanych()}
 
 
 def _uwaga_kompakt(u: Dict[str, Any]) -> Dict[str, Any]:

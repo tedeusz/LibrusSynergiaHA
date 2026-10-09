@@ -43,6 +43,28 @@ przegladaj:
       selector:
         text:
 
+przegladaj_wyslane:
+  name: Przeglądaj wysłane wiadomości
+  description: >
+    Przesuwa ekran listy wysłanych wiadomości o 5 pozycji w stronę starszych lub nowszych
+    (starsze strony są pobierane z Librusa). „Najnowsze” odświeża listę. Wiadomości nie są otwierane.
+  fields:
+    kierunek:
+      name: Kierunek
+      required: true
+      example: nastepna
+      selector:
+        select:
+          options:
+            - nastepna
+            - poprzednia
+            - najnowsze
+    config_entry_id:
+      name: Wpis integracji
+      required: false
+      selector:
+        text:
+
 przegladaj_ogloszenia:
   name: Przeglądaj ogłoszenia
   description: Przesuwa ekran listy ogłoszeń szkoły o 5 pozycji (bez zapytań do Librusa).
