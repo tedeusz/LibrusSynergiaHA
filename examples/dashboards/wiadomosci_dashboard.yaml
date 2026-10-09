@@ -133,7 +133,6 @@ views:
   # Druga zakładka: wiadomości wysłane (lista po 5 z paginacją; kliknięcie pokazuje treść na dole; "Najnowsze" odświeża listę z Librusa)
   - title: Wysłane
     path: wyslane
-    icon: mdi:email-send-outline
     cards:
       - type: vertical-stack
         cards:
